@@ -1,0 +1,158 @@
+/* Nómina DINMEC — estilos */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --naranja: #e87b17;
+  --naranja-claro: #fdf0e2;
+  --azul: #1d3a5f;
+  --azul-oscuro: #14293f;
+  --gris: #f4f5f7;
+  --borde: #dcdfe4;
+  --texto: #23303f;
+  --rojo: #c62828;
+  --rojo-claro: #fdecea;
+  --verde: #2e7d32;
+  --verde-claro: #e8f5e9;
+  --ambar: #b26a00;
+  --ambar-claro: #fff3e0;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--gris);
+  color: var(--texto);
+  font-size: 14px;
+}
+
+.oculto { display: none !important; }
+
+/* ---------- login ---------- */
+.login {
+  position: fixed; inset: 0; background: var(--azul-oscuro);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+}
+.login-caja {
+  background: #fff; padding: 36px; border-radius: 14px; text-align: center;
+  width: 340px; box-shadow: 0 12px 40px rgba(0,0,0,.4);
+}
+.login-logo { width: 180px; margin-bottom: 12px; }
+.login-caja h1 { color: var(--azul); font-size: 22px; margin-bottom: 6px; }
+.login-caja p { color: #667; margin-bottom: 14px; }
+.login-caja input {
+  width: 100%; padding: 10px 12px; border: 1px solid var(--borde);
+  border-radius: 8px; font-size: 15px; margin-bottom: 12px; text-align: center;
+}
+.error { color: var(--rojo); min-height: 18px; margin-top: 8px; }
+
+/* ---------- cabecera ---------- */
+.cabecera {
+  background: linear-gradient(135deg, var(--azul-oscuro), var(--azul));
+  color: #fff; padding: 14px 20px 0; display: flex; flex-wrap: wrap;
+  align-items: center; gap: 16px;
+}
+.logo { height: 52px; }
+.titulo h1 { font-size: 22px; font-weight: 700; }
+.titulo h1 span { color: var(--naranja); }
+.titulo p { font-size: 12px; opacity: .75; }
+.pestanas { display: flex; flex-wrap: wrap; gap: 4px; margin-left: auto; align-self: flex-end; }
+.pestanas button {
+  background: rgba(255,255,255,.08); color: #fff; border: none;
+  padding: 10px 14px; border-radius: 8px 8px 0 0; cursor: pointer; font-size: 13px;
+}
+.pestanas button:hover { background: rgba(255,255,255,.18); }
+.pestanas button.activa { background: var(--gris); color: var(--azul); font-weight: 600; }
+
+main { padding: 20px; max-width: 1500px; margin: 0 auto; }
+
+/* ---------- componentes ---------- */
+.tarjeta {
+  background: #fff; border-radius: 12px; padding: 18px;
+  box-shadow: 0 1px 4px rgba(20,41,63,.08); margin-bottom: 18px;
+}
+.tarjeta h2 { color: var(--azul); font-size: 17px; margin-bottom: 12px; }
+.tarjeta h3 { color: var(--azul); font-size: 14px; margin: 10px 0 8px; }
+
+.fila-controles { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 8px; }
+.campo { display: flex; flex-direction: column; gap: 4px; }
+.campo label { font-size: 12px; color: #556; font-weight: 600; }
+.campo input, .campo select {
+  padding: 8px 10px; border: 1px solid var(--borde); border-radius: 8px; font-size: 14px; background: #fff;
+}
+
+.btn {
+  padding: 9px 16px; border: none; border-radius: 8px; cursor: pointer;
+  font-size: 14px; font-weight: 600; background: #e6e9ee; color: var(--texto);
+}
+.btn:hover { filter: brightness(.96); }
+.btn-primario { background: var(--naranja); color: #fff; }
+.btn-azul { background: var(--azul); color: #fff; }
+.btn-peligro { background: var(--rojo); color: #fff; }
+.btn-mini { padding: 4px 10px; font-size: 12px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  background: var(--azul); color: #fff; padding: 8px 6px; text-align: left;
+  position: sticky; top: 0; font-weight: 600; white-space: nowrap;
+}
+td { padding: 6px; border-bottom: 1px solid var(--borde); white-space: nowrap; }
+tbody tr:hover { background: var(--naranja-claro); }
+.tabla-scroll { overflow-x: auto; max-height: 68vh; overflow-y: auto; border-radius: 8px; border: 1px solid var(--borde); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+td input, td select { padding: 4px 6px; border: 1px solid var(--borde); border-radius: 6px; font-size: 13px; }
+
+.etiqueta { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 600; }
+.et-rojo { background: var(--rojo-claro); color: var(--rojo); }
+.et-verde { background: var(--verde-claro); color: var(--verde); }
+.et-ambar { background: var(--ambar-claro); color: var(--ambar); }
+.et-azul { background: #e3ecf7; color: var(--azul); }
+
+.kpis { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 18px; }
+.kpi {
+  background: #fff; border-radius: 12px; padding: 14px 20px; min-width: 150px;
+  box-shadow: 0 1px 4px rgba(20,41,63,.08); border-left: 4px solid var(--naranja);
+}
+.kpi .valor { font-size: 22px; font-weight: 700; color: var(--azul); }
+.kpi .nombre { font-size: 12px; color: #667; }
+
+.aviso { padding: 10px 14px; border-radius: 8px; margin: 10px 0; }
+.aviso-ok { background: var(--verde-claro); color: var(--verde); }
+.aviso-error { background: var(--rojo-claro); color: var(--rojo); }
+.aviso-info { background: #e3ecf7; color: var(--azul); }
+.aviso-ambar { background: var(--ambar-claro); color: var(--ambar); }
+
+.zona-arrastre {
+  border: 2px dashed var(--naranja); border-radius: 12px; padding: 40px;
+  text-align: center; color: #667; background: var(--naranja-claro); cursor: pointer;
+}
+.zona-arrastre.encima { background: #ffe0bd; }
+.zona-arrastre b { color: var(--naranja); }
+
+.fila-falta { background: var(--rojo-claro) !important; }
+.fila-nolaboral { color: #99a; background: #fafbfc; }
+.texto-chico { font-size: 11.5px; color: #778; }
+
+/* ---------- recibos (impresión) ---------- */
+#zona-impresion { display: none; }
+@media print {
+  body > *:not(#zona-impresion) { display: none !important; }
+  #zona-impresion { display: block; }
+  body { background: #fff; }
+  .recibo {
+    page-break-inside: avoid; border: 1.5px solid #333; border-radius: 8px;
+    padding: 14px 18px; margin: 0 0 14px; font-size: 12px;
+  }
+  .recibo-cab { display: flex; align-items: center; gap: 14px; border-bottom: 1.5px solid #333; padding-bottom: 8px; margin-bottom: 8px; }
+  .recibo-cab img { height: 40px; }
+  .recibo-cab h2 { font-size: 15px; }
+  .recibo table { font-size: 12px; }
+  .recibo th { background: #eee !important; color: #000; position: static; padding: 4px 6px; border: 1px solid #999; }
+  .recibo td { padding: 4px 6px; border: 1px solid #999; }
+  .recibo .firmas { display: flex; justify-content: space-around; margin-top: 34px; }
+  .recibo .firmas div { border-top: 1px solid #333; padding: 4px 30px 0; text-align: center; }
+  .recibo .neto { font-size: 15px; font-weight: 700; }
+}
+
+@media (max-width: 800px) {
+  .pestanas { margin-left: 0; }
+  main { padding: 10px; }
+}

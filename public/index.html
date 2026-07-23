@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nómina DINMEC</title>
+<link rel="icon" href="logo.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Pantalla de acceso -->
+<div id="login" class="login oculto">
+  <div class="login-caja">
+    <img src="logo.png" alt="DINMEC" class="login-logo">
+    <h1>Nómina DINMEC</h1>
+    <p>Escribe la contraseña para entrar</p>
+    <input type="password" id="login-pass" placeholder="Contraseña" autocomplete="current-password">
+    <button id="login-btn" class="btn btn-primario">Entrar</button>
+    <p id="login-error" class="error"></p>
+  </div>
+</div>
+
+<!-- Aplicación -->
+<div id="app" class="oculto">
+  <header class="cabecera">
+    <img src="logo.png" alt="DINMEC" class="logo">
+    <div class="titulo">
+      <h1>Nómina <span>DINMEC</span></h1>
+      <p id="subtitulo">Control de asistencia y pago</p>
+    </div>
+    <nav class="pestanas" id="pestanas">
+      <button data-vista="nomina" class="activa">💰 Nómina</button>
+      <button data-vista="detalle">📅 Detalle diario</button>
+      <button data-vista="importar">⬆️ Importar checadas</button>
+      <button data-vista="empleados">👥 Empleados</button>
+      <button data-vista="turnos">🕐 Turnos</button>
+      <button data-vista="excepciones">📝 Excepciones</button>
+      <button data-vista="prestamos">🏦 Préstamos</button>
+      <button data-vista="parametros">⚙️ Parámetros</button>
+    </nav>
+  </header>
+
+  <main id="contenido"></main>
+</div>
+
+<!-- Zona de impresión de recibos -->
+<div id="zona-impresion"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,9 @@
+{
+  "name": "nomina-dinmec",
+  "version": "1.0.0",
+  "description": "Control de asistencia y nómina para DINMEC Solutions",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

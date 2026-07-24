@@ -233,14 +233,26 @@ function calcularDia(fecha, empleado, turno, minutos, excepcion, parametros, esF
     }
   }
 
-  // Horas trabajadas: salida − entrada, menos permisos y menos exceso de descansos.
+  // Horas trabajadas: salida − entrada, menos permisos y menos descansos.
+  // En día laboral solo se descuenta el EXCESO de descanso (el descanso permitido va
+  // incluido en la jornada). En día NO laboral (sábado/domingo/feriado) se descuenta
+  // TODO el tiempo de desayuno y comida: solo se paga el tiempo efectivo trabajado.
   let salida = c.salida;
   let entrada = c.entrada;
   if (turno.cruzaMedianoche && salida < entrada) salida += 1440;
-  const excesoDesayuno = Math.max(0, (dia.minDesayuno || 0) - desayunoPermitido);
-  const excesoComida = Math.max(0, (dia.minComida || 0) - comidaPermitida);
-  dia.minCastigo = excesoDesayuno + excesoComida;
-  let minTrabajados = (salida - entrada) - dia.minPermisos - excesoDesayuno - excesoComida;
+  let descuentoDescansos;
+  if (laboralTurno) {
+    const excesoDesayuno = Math.max(0, (dia.minDesayuno || 0) - desayunoPermitido);
+    const excesoComida = Math.max(0, (dia.minComida || 0) - comidaPermitida);
+    descuentoDescansos = excesoDesayuno + excesoComida;
+  } else {
+    descuentoDescansos = (dia.minDesayuno || 0) + (dia.minComida || 0);
+    if (descuentoDescansos > 0) {
+      dia.alertas.push(`Día no laboral: se descontaron ${descuentoDescansos} min de descansos del tiempo extra`);
+    }
+  }
+  dia.minCastigo = descuentoDescansos;
+  let minTrabajados = (salida - entrada) - dia.minPermisos - descuentoDescansos;
   if (minTrabajados < 0) minTrabajados = 0;
   dia.horasTrabajadas = +(minTrabajados / 60).toFixed(2);
 

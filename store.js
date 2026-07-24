@@ -92,7 +92,7 @@ const PARAMETROS_INICIALES = {
   factorHoraExtra: 1.5,        // hora extra normal = hora normal × 1.5
   factorHoraExtraCNC: 2,       // hora extra de puesto CNC = hora normal × 2
   factorHoraExtraDomingo: 2,   // trabajar en DOMINGO se paga doble para todos
-  redondeoHE: 0.5,             // horas extra redondeadas hacia abajo a múltiplos de 0.5 h (0 = sin redondeo)
+  redondeoHE: 0,               // 0 = conteo exacto al minuto; 0.5 o 1 = redondear hacia abajo a ese múltiplo
   montoDispersion: 4725.60,    // monto fijo de dispersión bancaria
   desayunoMin: 20,             // minutos de desayuno por defecto
   comidaMin: 30,               // minutos de comida por defecto

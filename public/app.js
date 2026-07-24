@@ -30,6 +30,15 @@ function dinero(n) {
   return '$' + (n || 0).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// 2.78 horas -> "2 h 47 min" (para mostrar el conteo exacto por minutos)
+function horasYMin(h) {
+  if (!h) return '0 min';
+  const totalMin = Math.round(h * 60);
+  const hrs = Math.floor(totalMin / 60), min = totalMin % 60;
+  if (hrs === 0) return `${min} min`;
+  return min === 0 ? `${hrs} h` : `${hrs} h ${min} min`;
+}
+
 function esc(t) {
   return String(t ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 }
@@ -236,7 +245,7 @@ VISTAS.nomina = async function () {
       <td class="num">${celdaRetardos(s2, 2, r)}</td>
       <td class="num">${s2 ? (s2.faltas || 0) : '—'}</td>
       <td class="num">${r.horasTrabajadas.toFixed(1)}</td>
-      <td class="num"><b>${r.horasExtras.toFixed(2)}</b>${r.heDomingo ? ` <span class="etiqueta et-ambar" title="Horas de domingo, pagadas al doble">dom ${r.heDomingo.toFixed(1)}</span>` : ''}</td>
+      <td class="num"><b>${horasYMin(r.horasExtras)}</b>${r.heDomingo ? ` <span class="etiqueta et-ambar" title="Horas de domingo, pagadas al doble">dom ${horasYMin(r.heDomingo)}</span>` : ''}</td>
       <td>
         <select data-id="${r.idReloj}" class="sel-destino" ${cerrado ? 'disabled' : ''}>
           <option value="pagar" ${r.destinoHE === 'pagar' ? 'selected' : ''}>💵 Pagar</option>
@@ -369,8 +378,8 @@ function imprimirRecibos() {
       <table>
         <tr><th>Concepto</th><th>Detalle</th><th style="text-align:right">Importe</th></tr>
         <tr><td>Sueldo (${r.semanas.length} semana${r.semanas.length > 1 ? 's' : ''})</td><td>${dinero(r.sueldoSemanal)} / semana</td><td class="num">${dinero(r.totalSueldo)}</td></tr>
-        ${r.pagoHE > 0 && r.heEntreSemana > 0 ? `<tr><td>Horas extras (L-S)</td><td>${r.heEntreSemana.toFixed(2)} h × ${dinero(r.costoHoraExtra)} (hora normal ×${r.factorHE})</td><td class="num">${dinero(r.heEntreSemana * r.costoHoraExtra)}</td></tr>` : ''}
-        ${r.pagoHE > 0 && r.heDomingo > 0 ? `<tr><td>Horas extras domingo</td><td>${r.heDomingo.toFixed(2)} h × ${dinero(r.costoHoraExtraDomingo)} (hora normal ×${r.factorDomingo})</td><td class="num">${dinero(r.heDomingo * r.costoHoraExtraDomingo)}</td></tr>` : ''}
+        ${r.pagoHE > 0 && r.heEntreSemana > 0 ? `<tr><td>Horas extras (L-S)</td><td>${horasYMin(r.heEntreSemana)} × ${dinero(r.costoHoraExtra)}/h (hora normal ×${r.factorHE})</td><td class="num">${dinero(r.heEntreSemana * r.costoHoraExtra)}</td></tr>` : ''}
+        ${r.pagoHE > 0 && r.heDomingo > 0 ? `<tr><td>Horas extras domingo</td><td>${horasYMin(r.heDomingo)} × ${dinero(r.costoHoraExtraDomingo)}/h (hora normal ×${r.factorDomingo})</td><td class="num">${dinero(r.heDomingo * r.costoHoraExtraDomingo)}</td></tr>` : ''}
         ${r.heABanco > 0 ? `<tr><td>Horas a banco</td><td>${r.heABanco.toFixed(2)} h guardadas</td><td class="num">—</td></tr>` : ''}
         ${r.recuperadoPorBanco > 0 ? `<tr><td>Faltas cubiertas con banco</td><td>${r.horasCubrenFaltas} h</td><td class="num">${dinero(r.recuperadoPorBanco)}</td></tr>` : ''}
         ${r.descuentos > 0 ? `<tr><td>Descuentos</td><td>${r.faltas} falta(s), ${r.retardos} retardo(s) → ${r.diasDescontados} día(s)</td><td class="num">−${dinero(r.descuentos)}</td></tr>` : ''}
@@ -441,7 +450,7 @@ VISTAS.detalle = async function () {
         <td class="num">${d.esRetardo ? `<span class="etiqueta et-rojo">Sí${d.retardoMin ? ' +' + d.retardoMin + 'm' : ''}</span>` : (d.laboral && d.numChecadas ? '<span class="etiqueta et-verde">No</span>' : '')}</td>
         <td class="num">${d.horasTrabajadas ? d.horasTrabajadas.toFixed(2) : ''}</td>
         <td class="num">${d.horasEsperadas || ''}</td>
-        <td class="num">${d.horasExtras ? '<b>' + d.horasExtras.toFixed(2) + '</b>' : ''}</td>
+        <td class="num">${d.horasExtras ? '<b>' + horasYMin(d.horasExtras) + '</b>' : ''}</td>
         <td class="texto-chico">${d.falta ? '<span class="etiqueta et-rojo">FALTA</span> ' : ''}${d.alertas.filter(a => !a.startsWith('FALTA')).map(esc).join(' · ')}</td>
       </tr>`;
     }
@@ -1055,11 +1064,11 @@ VISTAS.parametros = async function () {
         <div class="campo"><label>Hora extra normal (× hora normal)</label><input type="number" id="pa-factor" value="${p.factorHoraExtra ?? 1.5}" step="0.25" style="width:80px"></div>
         <div class="campo"><label>Hora extra CNC (× hora normal)</label><input type="number" id="pa-factor-cnc" value="${p.factorHoraExtraCNC ?? 2}" step="0.25" style="width:80px"></div>
         <div class="campo"><label>Domingo trabajado (× hora normal, todos)</label><input type="number" id="pa-factor-dom" value="${p.factorHoraExtraDomingo ?? 2}" step="0.25" style="width:80px"></div>
-        <div class="campo"><label>Redondeo de horas extra</label>
+        <div class="campo"><label>Conteo de horas extra</label>
           <select id="pa-redondeo">
-            <option value="0.5" ${(p.redondeoHE ?? 0.5) == 0.5 ? 'selected' : ''}>A media hora (2.78 → 2.5)</option>
-            <option value="1" ${p.redondeoHE == 1 ? 'selected' : ''}>A hora completa (2.78 → 2)</option>
-            <option value="0" ${p.redondeoHE === 0 ? 'selected' : ''}>Sin redondeo (exacto)</option>
+            <option value="0" ${!p.redondeoHE ? 'selected' : ''}>Exacto al minuto (recomendado)</option>
+            <option value="0.5" ${p.redondeoHE == 0.5 ? 'selected' : ''}>Redondear a media hora (2.78 → 2.5)</option>
+            <option value="1" ${p.redondeoHE == 1 ? 'selected' : ''}>Redondear a hora completa (2.78 → 2)</option>
           </select></div>
         <div class="campo"><label>Desayuno por defecto (min)</label><input type="number" id="pa-desayuno" value="${p.desayunoMin}" style="width:80px"></div>
         <div class="campo"><label>Comida por defecto (min)</label><input type="number" id="pa-comida" value="${p.comidaMin}" style="width:80px"></div>

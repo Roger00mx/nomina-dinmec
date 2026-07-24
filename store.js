@@ -38,7 +38,7 @@ const TURNOS_INICIALES = [
   { codigo: 'LIMPIEZA',      horaEntrada: '07:00', horaSalida: '16:00', dias: [1,2,3,4,5],   horasDia: 9,   cruzaMedianoche: false, descripcion: 'Limpieza 7-16 L-V' },
   { codigo: 'ALMACEN',       horaEntrada: '07:00', horaSalida: '16:30', dias: [1,2,3,4,5],   horasDia: 9.5, cruzaMedianoche: false, descripcion: 'Almacén 7-16:30 L-V' },
   { codigo: 'DIA_7A7',       horaEntrada: '07:00', horaSalida: '19:00', dias: [1,2,3,4,5],   horasDia: 10,  cruzaMedianoche: false, descripcion: 'Horario prolongado día (7am-7pm)' },
-  { codigo: 'NOCHE_7A7',     horaEntrada: '19:00', horaSalida: '07:00', dias: [1,2,3,4,5],   horasDia: 10,  cruzaMedianoche: true,  descripcion: 'Horario prolongado noche (7pm-7am)' },
+  { codigo: 'NOCHE_7A7',     horaEntrada: '19:00', horaSalida: '07:00', dias: [1,2,3,4,5],   horasDia: 8.4, cruzaMedianoche: true,  descuentaDescansos: false, descripcion: 'Nocturno 7pm-7am (42 h/sem, comida incluida)' },
 ];
 
 function emp(id, nombre, sueldo, turnoS1, turnoS2, costoHN, costoHE, dispersion, banco) {

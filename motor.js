@@ -132,12 +132,12 @@ function clasificarDia(minutos, turno, empleado, parametros, laboral) {
     r.alertas.push(`Descanso sin checada de regreso: se aplican ${castigo} min de castigo`);
   }
 
-  // Asignar desayuno y comida. Si solo hay un descanso, se decide por la mitad
-  // del turno: antes de la mitad es desayuno, después es comida.
+  // Asignar desayuno y comida. Si solo hay un descanso: en turno nocturno es la
+  // comida (cena de 30 min); en turno de día se decide por la mitad del turno.
   descansos.sort((a, b) => a.sal - b.sal);
   if (descansos.length === 1) {
     const mitadTurno = (entradaTurno + salidaTurno) / 2;
-    if (descansos[0].sal >= mitadTurno) r.comida = descansos[0];
+    if (turno.cruzaMedianoche || descansos[0].sal >= mitadTurno) r.comida = descansos[0];
     else r.desayuno = descansos[0];
   } else {
     if (descansos.length > 0) r.desayuno = descansos[0];
@@ -240,15 +240,19 @@ function calcularDia(fecha, empleado, turno, minutos, excepcion, parametros, esF
   let salida = c.salida;
   let entrada = c.entrada;
   if (turno.cruzaMedianoche && salida < entrada) salida += 1440;
+  // Los turnos con "jornada efectiva" (ej. el nocturno de 8.4 h) descuentan TODO el
+  // descanso también en días laborales: extra = horas totales − jornada − descansos.
   let descuentoDescansos;
-  if (laboralTurno) {
+  if (laboralTurno && !turno.descuentaDescansos) {
     const excesoDesayuno = Math.max(0, (dia.minDesayuno || 0) - desayunoPermitido);
     const excesoComida = Math.max(0, (dia.minComida || 0) - comidaPermitida);
     descuentoDescansos = excesoDesayuno + excesoComida;
   } else {
     descuentoDescansos = (dia.minDesayuno || 0) + (dia.minComida || 0);
     if (descuentoDescansos > 0) {
-      dia.alertas.push(`Día no laboral: se descontaron ${descuentoDescansos} min de descansos del tiempo extra`);
+      dia.alertas.push(laboralTurno
+        ? `Jornada efectiva: se descontaron ${descuentoDescansos} min de descansos`
+        : `Día no laboral: se descontaron ${descuentoDescansos} min de descansos del tiempo extra`);
     }
   }
   dia.minCastigo = descuentoDescansos;

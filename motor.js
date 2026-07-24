@@ -46,6 +46,14 @@ function diaSemana(iso) { // 1=Lun ... 7=Dom
 
 const NOMBRES_DIA = { 1: 'Lun', 2: 'Mar', 3: 'Mié', 4: 'Jue', 5: 'Vie', 6: 'Sáb', 7: 'Dom' };
 
+// Redondea las horas extra HACIA ABAJO al múltiplo configurado (0.5 h por defecto).
+// Ej.: 2.78 → 2.5, 1.15 → 1.0, 0.98 → 0.5. Con redondeoHE = 0 no se redondea.
+function redondearExtra(horas, parametros) {
+  const paso = parametros.redondeoHE ?? 0.5;
+  if (!paso || paso <= 0) return +horas.toFixed(2);
+  return +(Math.floor(horas / paso + 1e-9) * paso).toFixed(2);
+}
+
 // Encuentra el inicio de la semana de nómina que contiene la fecha dada.
 function inicioDeSemana(iso, diaInicio) {
   let f = iso;
@@ -186,6 +194,14 @@ function calcularDia(fecha, empleado, turno, minutos, excepcion, parametros, esF
   const tiposLibres = ['Permiso', 'Incapacidad', 'Vacaciones'];
   const diaLibre = excepcion && tiposLibres.includes(excepcion.tipo);
 
+  // Empleados con pago fijo que no usan checador (practicantes): siempre cobran
+  // su semana completa, sin faltas ni retardos, y sus checadas (si las hay) se ignoran.
+  if (empleado.sinChecador) {
+    dia.horasTrabajadas = (laboralTurno && !diaLibre) ? dia.horasEsperadas : 0;
+    if (laboralTurno) dia.alertas.push('Pago fijo: no usa checador');
+    return dia;
+  }
+
   if (minutos.length === 0) {
     if (laboralTurno && !diaLibre) {
       dia.falta = true;
@@ -228,19 +244,18 @@ function calcularDia(fecha, empleado, turno, minutos, excepcion, parametros, esF
   if (minTrabajados < 0) minTrabajados = 0;
   dia.horasTrabajadas = +(minTrabajados / 60).toFixed(2);
 
-  // Horas extras
+  // Horas extras (redondeadas hacia abajo a múltiplos de 0.5 h)
   if (!laboralTurno) {
     // Día no laboral trabajado (sábado extra, feriado): todo cuenta como extra.
-    dia.horasExtras = dia.horasTrabajadas;
+    dia.horasExtras = redondearExtra(dia.horasTrabajadas, parametros);
     if (dia.horasTrabajadas > 0) dia.alertas.push('Día no laboral trabajado: horas cuentan como extra');
   } else {
     const extra = dia.horasTrabajadas - dia.horasEsperadas;
-    dia.horasExtras = extra >= parametros.umbralHorasExtra ? +extra.toFixed(2) : 0;
+    dia.horasExtras = extra >= parametros.umbralHorasExtra ? redondearExtra(extra, parametros) : 0;
     if (extra < -0.5 && !c.salidaAsumida && !diaLibre) {
       dia.alertas.push(`Salió ${Math.abs(extra).toFixed(1)} h antes de completar su turno`);
     }
   }
-  dia.horasExtras = +dia.horasExtras.toFixed(2);
 
   return dia;
 }
@@ -278,6 +293,13 @@ function calcularPeriodo(opciones) {
       viajePorDia[v.idReloj + '_' + f] = v;
       f = sumarDias(f, 1);
     }
+  }
+
+  // Índice de horarios capturados a mano (entrada/salida editadas, con responsable
+  // y foto de justificación): "id_fecha" -> captura. Manda sobre checadas y viajes.
+  const capturaPorDia = {};
+  for (const c of (opciones.capturas || [])) {
+    if (c.fecha) capturaPorDia[c.idReloj + '_' + c.fecha] = c;
   }
 
   // Agrupar checadas por empleado y fecha (en minutos desde medianoche).
@@ -393,6 +415,26 @@ function calcularPeriodo(opciones) {
           if (minutosDia.length > 0) dia.alertas.push('Tenía checadas ese día: se ignoraron por la captura de viaje');
         }
 
+        // Horario editado a mano (entrada y salida exactas, con responsable y foto):
+        // tiene la última palabra sobre checadas y sobre el registro de viaje.
+        const captura = capturaPorDia[empleado.idReloj + '_' + fecha];
+        if (captura && captura.entrada && captura.salida) {
+          let ent = aMin(captura.entrada), sal = aMin(captura.salida);
+          if (sal <= ent) sal += 1440; // salida al día siguiente (viaje nocturno)
+          const hrs = +((sal - ent) / 60).toFixed(2);
+          dia.falta = false; dia.esRetardo = false; dia.retardoMin = 0;
+          dia.entrada = captura.entrada + '✏'; dia.salida = captura.salida + '✏';
+          dia.salDesayuno = null; dia.regDesayuno = null; dia.salComida = null; dia.regComida = null;
+          dia.minDesayuno = 0; dia.minComida = 0; dia.minPermisos = 0; dia.minCastigo = 0;
+          dia.horasTrabajadas = hrs;
+          let extra = dia.laboral ? Math.max(0, hrs - dia.horasEsperadas) : hrs;
+          if (dia.laboral && extra < parametros.umbralHorasExtra) extra = 0;
+          dia.horasExtras = redondearExtra(extra, parametros);
+          dia.alertas = ['✏️ Horario capturado por ' + (captura.capturadoPor || '(sin nombre)')
+            + (captura.foto ? ' · 📷 con foto' : '')
+            + (captura.nota ? ' — ' + captura.nota : '')];
+        }
+
         dias.push(dia);
 
         if (dia.esRetardo) sem.retardos++;
@@ -415,9 +457,17 @@ function calcularPeriodo(opciones) {
     const diasSemana = turnoBase ? turnoBase.dias.length : 5;
     const costoDia = diasSemana > 0 ? empleado.sueldoSemanal / diasSemana : 0;
 
+    // Decisiones del periodo (se necesitan desde aquí para la justificación de retardos)
+    const clave = claveDecisiones + '_' + empleado.idReloj;
+    const dec = (decisiones && decisiones[clave]) || {};
+
     let sueldoBase = 0, descuentos = 0, totRetardos = 0, totFaltas = 0, totHE = 0, totHEDom = 0, totHrs = 0, diasDescontados = 0;
-    for (const sem of semanasEmp) {
-      const diasDesc = sem.faltas + sem.diasDescuentoRetardos;
+    semanasEmp.forEach((sem, idx) => {
+      // Con justificante autorizado, el descuento por retardos de esa semana se perdona.
+      const autoriza = (dec.justRetardos || {})[String(idx + 1)] || '';
+      sem.justificadoPor = autoriza;
+      const descRetardos = autoriza ? 0 : sem.diasDescuentoRetardos;
+      const diasDesc = sem.faltas + descRetardos;
       sueldoBase += empleado.sueldoSemanal;
       // El descuento de una semana nunca puede ser mayor que el sueldo de esa semana.
       descuentos += Math.min(diasDesc * costoDia, empleado.sueldoSemanal);
@@ -427,7 +477,7 @@ function calcularPeriodo(opciones) {
       totHE += sem.horasExtras;
       totHEDom += sem.heDomingo;
       totHrs += sem.horasTrabajadas;
-    }
+    });
 
     // Costo de la hora extra según el puesto: CNC al doble, los demás a tiempo y medio.
     // El DOMINGO se paga doble para todos (si el factor del puesto es mayor, se respeta).
@@ -437,9 +487,6 @@ function calcularPeriodo(opciones) {
     const costoHoraExtraDomingo = +((empleado.costoHoraNormal || 0) * factorDomingo).toFixed(2);
     const heEntreSemana = +(totHE - totHEDom).toFixed(2);
 
-    // Decisiones del periodo (destino de horas extra, horas de banco aplicadas a faltas)
-    const clave = claveDecisiones + '_' + empleado.idReloj;
-    const dec = (decisiones && decisiones[clave]) || {};
     const destinoHE = dec.destinoHE || 'pagar'; // 'pagar' | 'banco'
     const saldoBanco = (banco && banco[empleado.idReloj]) || 0;
     const horasCubren = Math.min(dec.horasCubrenFaltas || 0, saldoBanco);

@@ -111,6 +111,7 @@ function datosBase() {
     excepciones: store.leer('excepciones', []),
     asignaciones: store.leer('asignaciones', []),
     viajes: store.leer('viajes', []),
+    capturas: store.leer('capturas', []),
     prestamos: store.leer('prestamos', []),
     banco: store.leer('banco', {}),
     decisiones: store.leer('decisiones', {}),
@@ -292,7 +293,7 @@ const servidor = http.createServer(async (req, res) => {
       if (!tieneAcceso(req)) return json(res, 401, { error: 'Sesión no iniciada' });
 
       // Colecciones simples con CRUD por reemplazo completo
-      const colecciones = ['empleados', 'turnos', 'excepciones', 'prestamos', 'asignaciones', 'viajes'];
+      const colecciones = ['empleados', 'turnos', 'excepciones', 'prestamos', 'asignaciones', 'viajes', 'capturas'];
       for (const col of colecciones) {
         if (ruta === '/api/' + col) {
           if (req.method === 'GET') return json(res, 200, store.leer(col, []));
@@ -320,7 +321,7 @@ const servidor = http.createServer(async (req, res) => {
 
       // Respaldo completo de todos los datos (para migrar a la nube o guardar copia)
       const COLECCIONES_RESPALDO = ['parametros', 'empleados', 'turnos', 'checadas', 'excepciones',
-        'asignaciones', 'viajes', 'prestamos', 'banco', 'decisiones', 'periodos'];
+        'asignaciones', 'viajes', 'capturas', 'prestamos', 'banco', 'decisiones', 'periodos'];
 
       if (ruta === '/api/respaldo' && req.method === 'GET') {
         const datos = { app: 'nomina-dinmec', creado: new Date().toISOString() };

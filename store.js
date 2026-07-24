@@ -92,6 +92,7 @@ const PARAMETROS_INICIALES = {
   factorHoraExtra: 1.5,        // hora extra normal = hora normal × 1.5
   factorHoraExtraCNC: 2,       // hora extra de puesto CNC = hora normal × 2
   factorHoraExtraDomingo: 2,   // trabajar en DOMINGO se paga doble para todos
+  redondeoHE: 0.5,             // horas extra redondeadas hacia abajo a múltiplos de 0.5 h (0 = sin redondeo)
   montoDispersion: 4725.60,    // monto fijo de dispersión bancaria
   desayunoMin: 20,             // minutos de desayuno por defecto
   comidaMin: 30,               // minutos de comida por defecto
@@ -108,6 +109,7 @@ function inicializar() {
   if (!fs.existsSync(rutaDe('excepciones'))) guardar('excepciones', []);
   if (!fs.existsSync(rutaDe('asignaciones'))) guardar('asignaciones', []); // turnos por semana
   if (!fs.existsSync(rutaDe('viajes')))       guardar('viajes', []);       // horas manuales de choferes en viaje
+  if (!fs.existsSync(rutaDe('capturas')))     guardar('capturas', []);     // horarios editados a mano (con foto)
 
   if (!fs.existsSync(rutaDe('prestamos')))   guardar('prestamos', []);
   if (!fs.existsSync(rutaDe('banco')))       guardar('banco', {});      // { idReloj: horas }

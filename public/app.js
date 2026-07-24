@@ -202,6 +202,22 @@ VISTAS.nomina = async function () {
     </div>`);
 
   // tabla principal
+  function celdaRetardos(sem, numSem, r) {
+    if (!sem) return '—';
+    let html = String(sem.retardos || 0);
+    if (sem.diasDescuentoRetardos > 0) {
+      if (sem.justificadoPor) {
+        html += ` <span class="etiqueta et-verde btn-quitar-just" data-id="${r.idReloj}" data-sem="${numSem}"
+          style="cursor:pointer" title="Descuento perdonado. Autorizó: ${esc(sem.justificadoPor)}. Clic para quitar la justificación.">✓ ${esc(sem.justificadoPor)}</span>`;
+      } else {
+        html += ` <span class="etiqueta et-rojo">−${sem.diasDescuentoRetardos}d</span>
+          <button class="btn btn-mini btn-justificar" data-id="${r.idReloj}" data-sem="${numSem}"
+          title="Perdonar el descuento de esta semana con justificante autorizado" ${cerrado ? 'disabled' : ''}>🖊 Justificar</button>`;
+      }
+    }
+    return html;
+  }
+
   let filas = '';
   for (const r of NOMINA.resumen) {
     const s1 = r.semanas[0] || {};
@@ -215,9 +231,9 @@ VISTAS.nomina = async function () {
       <td>${etiquetaGrupo}</td>
       <td class="texto-chico">${fechaBonita(r.periodoInicio)} – ${fechaBonita(r.periodoFin)}</td>
       <td class="num">${dinero(r.sueldoSemanal)}</td>
-      <td class="num">${s1.retardos || 0}${s1.diasDescuentoRetardos ? ` <span class="etiqueta et-rojo">−${s1.diasDescuentoRetardos}d</span>` : ''}</td>
+      <td class="num">${celdaRetardos(s1, 1, r)}</td>
       <td class="num">${s1.faltas || 0}</td>
-      <td class="num">${s2 ? (s2.retardos || 0) + (s2.diasDescuentoRetardos ? ` <span class="etiqueta et-rojo">−${s2.diasDescuentoRetardos}d</span>` : '') : '—'}</td>
+      <td class="num">${celdaRetardos(s2, 2, r)}</td>
       <td class="num">${s2 ? (s2.faltas || 0) : '—'}</td>
       <td class="num">${r.horasTrabajadas.toFixed(1)}</td>
       <td class="num"><b>${r.horasExtras.toFixed(2)}</b>${r.heDomingo ? ` <span class="etiqueta et-ambar" title="Horas de domingo, pagadas al doble">dom ${r.heDomingo.toFixed(1)}</span>` : ''}</td>
@@ -281,6 +297,25 @@ VISTAS.nomina = async function () {
   contenido.querySelectorAll('.inp-cubrir').forEach(inp => inp.addEventListener('change', async () => {
     await api('/api/decisiones', { method: 'PUT', body: { clave: NOMINA.fechaPago + '_' + inp.dataset.id, datos: { horasCubrenFaltas: +inp.value || 0 } } });
     navegar('nomina');
+  }));
+
+  async function guardarJustificacion(idReloj, numSem, autoriza) {
+    const r = NOMINA.resumen.find(x => x.idReloj == idReloj);
+    const justRetardos = {};
+    r.semanas.forEach((sem, i) => { if (sem.justificadoPor) justRetardos[String(i + 1)] = sem.justificadoPor; });
+    if (autoriza) justRetardos[String(numSem)] = autoriza;
+    else delete justRetardos[String(numSem)];
+    await api('/api/decisiones', { method: 'PUT', body: { clave: NOMINA.fechaPago + '_' + idReloj, datos: { justRetardos } } });
+    navegar('nomina');
+  }
+  contenido.querySelectorAll('.btn-justificar').forEach(btn => btn.addEventListener('click', () => {
+    const quien = prompt('Justificante de retardos:\n¿Quién AUTORIZA perdonar el descuento de esta semana?\n(escribe el nombre)');
+    if (quien && quien.trim()) guardarJustificacion(btn.dataset.id, btn.dataset.sem, quien.trim());
+  }));
+  contenido.querySelectorAll('.btn-quitar-just').forEach(et => et.addEventListener('click', () => {
+    if (confirm('¿Quitar la justificación? El descuento por retardos volverá a aplicarse.')) {
+      guardarJustificacion(et.dataset.id, et.dataset.sem, '');
+    }
   }));
 
   contenido.querySelectorAll('.btn-aplicar-sug').forEach(btn => btn.addEventListener('click', async () => {
@@ -527,6 +562,7 @@ VISTAS.empleados = async function () {
       <td><input type="number" value="${e.comidaMin}" data-c="comidaMin" style="width:55px"></td>
       <td style="text-align:center"><input type="checkbox" ${e.dispersion ? 'checked' : ''} data-c="dispersion"></td>
       <td><input value="${esc(e.banco || '')}" data-c="banco" style="width:90px"></td>
+      <td style="text-align:center"><input type="checkbox" ${e.sinChecador ? 'checked' : ''} data-c="sinChecador" title="Pago fijo: cobra su semana completa sin checar (practicantes)"></td>
       <td style="text-align:center"><input type="checkbox" ${e.activo ? 'checked' : ''} data-c="activo"></td>
       <td><button class="btn btn-mini btn-peligro btn-quitar">✕</button></td>
     </tr>`;
@@ -552,7 +588,7 @@ VISTAS.empleados = async function () {
       <datalist id="lista-puestos"><option value="CNC"><option value="OFICINA"><option value="METROLOGIA"><option value="LIMPIEZA"><option value="ALMACEN"><option value="PRACTICANTE"></datalist>
       <div class="tabla-scroll"><table>
         <thead><tr><th>ID Reloj</th><th>Nombre</th><th>Puesto</th><th>Grupo</th><th>Sueldo sem.</th><th>Turno S1</th><th>Turno S2</th>
-        <th>$ H. normal</th><th>Desay. (min)</th><th>Comida (min)</th><th>Dispersión</th><th>Banco</th><th>Activo</th><th></th></tr></thead>
+        <th>$ H. normal</th><th>Desay. (min)</th><th>Comida (min)</th><th>Dispersión</th><th>Banco</th><th>No checa<br>(pago fijo)</th><th>Activo</th><th></th></tr></thead>
         <tbody id="cuerpo-emp">${EMPLEADOS.map(filaEmpleado).join('')}</tbody>
       </table></div>
       <div id="msg-emp"></div>
@@ -582,7 +618,8 @@ VISTAS.empleados = async function () {
         turnoS1: v('turnoS1').value, turnoS2: v('turnoS2').value,
         costoHoraNormal: +v('costoHoraNormal').value || 0,
         desayunoMin: +v('desayunoMin').value || 20, comidaMin: +v('comidaMin').value || 30,
-        dispersion: v('dispersion').checked, banco: v('banco').value.trim(), activo: v('activo').checked,
+        dispersion: v('dispersion').checked, banco: v('banco').value.trim(),
+        sinChecador: v('sinChecador').checked, activo: v('activo').checked,
       };
       if (emp.idReloj && emp.nombre) lista.push(emp);
     }
@@ -666,8 +703,8 @@ VISTAS.turnos = async function () {
 // VISTA: EXCEPCIONES
 // ============================================================
 VISTAS.excepciones = async function () {
-  const [excepciones, asignaciones, viajes] = await Promise.all([
-    api('/api/excepciones'), api('/api/asignaciones'), api('/api/viajes')]);
+  const [excepciones, asignaciones, viajes, capturas] = await Promise.all([
+    api('/api/excepciones'), api('/api/asignaciones'), api('/api/viajes'), api('/api/capturas')]);
   const TIPOS = ['Permiso', 'Incapacidad', 'Vacaciones', 'Retardo justificado', 'Cambio turno'];
 
   const opcionesEmp = id => EMPLEADOS.filter(e => e.activo).map(e =>
@@ -707,7 +744,42 @@ VISTAS.excepciones = async function () {
     </tr>`;
   }
 
+  function filaCaptura(c) {
+    return `<tr>
+      <td><select data-c="idReloj">${opcionesEmp(c.idReloj)}</select></td>
+      <td><input type="date" value="${c.fecha || ''}" data-c="fecha"></td>
+      <td><input type="time" value="${c.entrada || ''}" data-c="entrada"></td>
+      <td><input type="time" value="${c.salida || ''}" data-c="salida"></td>
+      <td><input value="${esc(c.capturadoPor || '')}" data-c="capturadoPor" style="width:130px" placeholder="quién captura"></td>
+      <td><input value="${esc(c.nota || '')}" data-c="nota" style="width:150px" placeholder="motivo"></td>
+      <td style="white-space:nowrap">
+        <input type="hidden" data-c="foto" value="${esc(c.foto || '')}">
+        <button class="btn btn-mini btn-foto" title="Subir o tomar foto del justificante">📷</button>
+        <button class="btn btn-mini btn-ver-foto" ${c.foto ? '' : 'style="display:none"'}>Ver</button>
+        <input type="file" accept="image/*" capture="environment" style="display:none" class="inp-foto">
+      </td>
+      <td><button class="btn btn-mini btn-peligro btn-quitar">✕</button></td>
+    </tr>`;
+  }
+
   contenido.innerHTML = `
+    <div class="tarjeta">
+      <div class="fila-controles">
+        <h2 style="margin:0">✏️ Editar horarios de choferes — entrada/salida con evidencia</h2>
+        <span style="flex:1"></span>
+        <button class="btn" id="btn-agregar-c">➕ Agregar día</button>
+        <button class="btn btn-primario" id="btn-guardar-c">💾 Guardar cambios</button>
+      </div>
+      <p class="texto-chico" style="margin:6px 0 10px">Para editar la <b>entrada y salida exactas</b> de un día (Antonio, Honorio…):
+        se registra <b>quién hace la captura</b> y se puede adjuntar <b>foto del justificante</b> (desde el celular abre la cámara).
+        Ese día no genera retardo ni falta; si la salida es menor que la entrada, se entiende que salió al día siguiente.
+        Esta captura manda sobre las checadas del reloj y sobre el registro de viaje.</p>
+      <div class="tabla-scroll"><table>
+        <thead><tr><th>Empleado</th><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Capturado por</th><th>Nota</th><th>Foto</th><th></th></tr></thead>
+        <tbody id="cuerpo-cap">${capturas.map(filaCaptura).join('')}</tbody>
+      </table></div>
+      <div id="msg-cap"></div>
+    </div>
     <div class="tarjeta">
       <div class="fila-controles">
         <h2 style="margin:0">🚚 Horas de viaje — captura manual para choferes</h2>
@@ -757,6 +829,73 @@ VISTAS.excepciones = async function () {
       </table></div>
       <div id="msg-exc"></div>
     </div>`;
+
+  // --- capturas de horario con foto ---
+  function reducirFoto(archivo) {
+    return new Promise((resolver, rechazar) => {
+      const img = new Image();
+      img.onload = () => {
+        const escala = Math.min(1, 900 / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * escala);
+        canvas.height = Math.round(img.height * escala);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolver(canvas.toDataURL('image/jpeg', 0.7));
+      };
+      img.onerror = () => rechazar(new Error('No se pudo leer la imagen'));
+      img.src = URL.createObjectURL(archivo);
+    });
+  }
+
+  function verFoto(dataURL) {
+    const fondo = document.createElement('div');
+    fondo.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:200;display:flex;align-items:center;justify-content:center;cursor:zoom-out';
+    fondo.innerHTML = `<img src="${dataURL}" style="max-width:92vw;max-height:92vh;border-radius:8px">`;
+    fondo.addEventListener('click', () => fondo.remove());
+    document.body.appendChild(fondo);
+  }
+
+  $('#btn-agregar-c').addEventListener('click', () => {
+    $('#cuerpo-cap').insertAdjacentHTML('beforeend', filaCaptura({ idReloj: EMPLEADOS[0]?.idReloj, fecha: '' }));
+  });
+  $('#cuerpo-cap').addEventListener('click', async e => {
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+    if (e.target.classList.contains('btn-quitar')) {
+      if (confirm('¿Eliminar esta captura de horario?')) tr.remove();
+    } else if (e.target.classList.contains('btn-foto')) {
+      tr.querySelector('.inp-foto').click();
+    } else if (e.target.classList.contains('btn-ver-foto')) {
+      const foto = tr.querySelector('[data-c="foto"]').value;
+      if (foto) verFoto(foto);
+    }
+  });
+  $('#cuerpo-cap').addEventListener('change', async e => {
+    if (!e.target.classList.contains('inp-foto')) return;
+    const tr = e.target.closest('tr');
+    const archivo = e.target.files[0];
+    if (!archivo) return;
+    try {
+      tr.querySelector('[data-c="foto"]').value = await reducirFoto(archivo);
+      tr.querySelector('.btn-ver-foto').style.display = '';
+      $('#msg-cap').innerHTML = '<div class="aviso aviso-info">📷 Foto lista. No olvides dar «Guardar cambios».</div>';
+    } catch (err) {
+      alert('No se pudo procesar la foto: ' + err.message);
+    }
+  });
+  $('#btn-guardar-c').addEventListener('click', async () => {
+    const lista = [];
+    for (const tr of document.querySelectorAll('#cuerpo-cap tr')) {
+      const v = c => tr.querySelector(`[data-c="${c}"]`);
+      const reg = { idReloj: +v('idReloj').value, fecha: v('fecha').value, entrada: v('entrada').value, salida: v('salida').value, capturadoPor: v('capturadoPor').value.trim(), nota: v('nota').value.trim(), foto: v('foto').value };
+      if (reg.idReloj && reg.fecha && reg.entrada && reg.salida) {
+        if (!reg.capturadoPor) { $('#msg-cap').innerHTML = '<div class="aviso aviso-error">Falta «Capturado por» en una fila: escribe quién hace la captura.</div>'; return; }
+        lista.push(reg);
+      }
+    }
+    await api('/api/capturas', { method: 'PUT', body: lista });
+    $('#msg-cap').innerHTML = '<div class="aviso aviso-ok">✅ Cambios guardados</div>';
+  });
 
   $('#btn-agregar-v').addEventListener('click', () => {
     $('#cuerpo-via').insertAdjacentHTML('beforeend', filaViaje({ idReloj: EMPLEADOS[0]?.idReloj, desde: '', hasta: '', horasExtraDia: 0 }));
@@ -916,6 +1055,12 @@ VISTAS.parametros = async function () {
         <div class="campo"><label>Hora extra normal (× hora normal)</label><input type="number" id="pa-factor" value="${p.factorHoraExtra ?? 1.5}" step="0.25" style="width:80px"></div>
         <div class="campo"><label>Hora extra CNC (× hora normal)</label><input type="number" id="pa-factor-cnc" value="${p.factorHoraExtraCNC ?? 2}" step="0.25" style="width:80px"></div>
         <div class="campo"><label>Domingo trabajado (× hora normal, todos)</label><input type="number" id="pa-factor-dom" value="${p.factorHoraExtraDomingo ?? 2}" step="0.25" style="width:80px"></div>
+        <div class="campo"><label>Redondeo de horas extra</label>
+          <select id="pa-redondeo">
+            <option value="0.5" ${(p.redondeoHE ?? 0.5) == 0.5 ? 'selected' : ''}>A media hora (2.78 → 2.5)</option>
+            <option value="1" ${p.redondeoHE == 1 ? 'selected' : ''}>A hora completa (2.78 → 2)</option>
+            <option value="0" ${p.redondeoHE === 0 ? 'selected' : ''}>Sin redondeo (exacto)</option>
+          </select></div>
         <div class="campo"><label>Desayuno por defecto (min)</label><input type="number" id="pa-desayuno" value="${p.desayunoMin}" style="width:80px"></div>
         <div class="campo"><label>Comida por defecto (min)</label><input type="number" id="pa-comida" value="${p.comidaMin}" style="width:80px"></div>
         <div class="campo"><label>Olvido de entrada a partir de (min tarde)</label><input type="number" id="pa-olvido" value="${p.olvidoEntradaMin}" style="width:80px"></div>
@@ -996,6 +1141,7 @@ VISTAS.parametros = async function () {
         factorHoraExtra: +$('#pa-factor').value || 1.5,
         factorHoraExtraCNC: +$('#pa-factor-cnc').value || 2,
         factorHoraExtraDomingo: +$('#pa-factor-dom').value || 2,
+        redondeoHE: +$('#pa-redondeo').value,
         desayunoMin: +$('#pa-desayuno').value,
         comidaMin: +$('#pa-comida').value,
         olvidoEntradaMin: +$('#pa-olvido').value,

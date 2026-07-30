@@ -290,9 +290,23 @@ function calcularPeriodo(opciones) {
   const feriados = new Set((parametros.feriados || []).map(f => f.fecha));
   const fechaFin = sumarDias(fechaInicio, numSemanas * 7 - 1);
 
-  // Índice de excepciones: "id_fecha" -> excepción
+  // Índice de excepciones: "id_fecha" -> excepción. Una excepción puede abarcar un
+  // RANGO (fecha a hasta); en permisos/incapacidades/vacaciones/retardo justificado
+  // los sábados y domingos del rango se omiten (no cuentan para esos conceptos).
+  const tiposSinFinDeSemana = ['Permiso', 'Incapacidad', 'Vacaciones', 'Retardo justificado'];
   const excPorClave = {};
-  for (const e of excepciones) excPorClave[e.idReloj + '_' + e.fecha] = e;
+  for (const e of excepciones) {
+    if (!e.fecha) continue;
+    const hasta = (e.hasta && e.hasta >= e.fecha) ? e.hasta : e.fecha;
+    let f = e.fecha;
+    for (let i = 0; i < 60 && f <= hasta; i++) {
+      const ds = diaSemana(f);
+      if (!(tiposSinFinDeSemana.includes(e.tipo) && (ds === 6 || ds === 7))) {
+        excPorClave[e.idReloj + '_' + f] = e;
+      }
+      f = sumarDias(f, 1);
+    }
+  }
 
   // Índice de turnos asignados por semana: "id_viernesInicio" -> código de turno
   // (para horarios especiales temporales, ej. "esta semana trabajan de 7pm a 7am")
@@ -388,11 +402,18 @@ function calcularPeriodo(opciones) {
         let minutosDia = [];
         if (turnoDia.cruzaMedianoche) {
           // La hora de salida (ej. 07:00) es del día siguiente; se aceptan checadas hasta 4 h después.
+          // Solo se toman checadas de la madrugada siguiente si ESA noche hubo checada de entrada:
+          // si no, esas checadas matutinas son de otro día/turno y contarlas duplicaría horas.
           const finVentana = aMin(turnoDia.horaSalida) + 240;
           for (const ch of lista) {
             const m = aMin(ch.hora.slice(0, 5));
             if (ch.fecha === fecha && m >= aMin(turnoDia.horaEntrada) - 120) minutosDia.push(m);
-            else if (ch.fecha === sumarDias(fecha, 1) && m <= finVentana) minutosDia.push(m + 1440);
+          }
+          if (minutosDia.length > 0) {
+            for (const ch of lista) {
+              const m = aMin(ch.hora.slice(0, 5));
+              if (ch.fecha === sumarDias(fecha, 1) && m <= finVentana) minutosDia.push(m + 1440);
+            }
           }
         } else {
           // Checadas de madrugada (antes de las 5:00) pertenecen al día anterior:
@@ -404,8 +425,10 @@ function calcularPeriodo(opciones) {
           }
         }
         minutosDia.sort((a, b) => a - b);
-        // Quitar checadas dobles (menos de 2 minutos entre una y otra)
-        minutosDia = minutosDia.filter((m, i) => i === 0 || m - minutosDia[i - 1] >= 2);
+        // Checadas dobles: si alguien checa dos veces seguidas (con pocos minutos de
+        // diferencia, por olvido o nervios) se toma en cuenta SOLO LA PRIMERA.
+        const ventanaDoble = parametros.ventanaDobleChecada ?? 5;
+        minutosDia = minutosDia.filter((m, i) => i === 0 || m - minutosDia[i - 1] > ventanaDoble);
 
         const dia = calcularDia(fecha, empleado, turnoDia, minutosDia, exc, parametros, feriados.has(fecha));
         dia.semana = s + 1;
@@ -449,6 +472,7 @@ function calcularPeriodo(opciones) {
           dia.alertas = ['✏️ Horario capturado por ' + (captura.capturadoPor || '(sin nombre)')
             + (captura.foto ? ' · 📷 con foto' : '')
             + (captura.nota ? ' — ' + captura.nota : '')];
+          dia.editadoManual = true;
         }
 
         dias.push(dia);
@@ -559,11 +583,17 @@ function calcularPeriodo(opciones) {
 function checadasDelDia(lista, fecha, turno) {
   const ms = [];
   if (turno.cruzaMedianoche) {
+    // Igual que en el cálculo: la madrugada siguiente solo cuenta si hubo entrada esa noche.
     const finVentana = aMin(turno.horaSalida) + 240;
     for (const ch of lista) {
       const m = aMin(ch.hora.slice(0, 5));
       if (ch.fecha === fecha && m >= aMin(turno.horaEntrada) - 120) ms.push(m);
-      else if (ch.fecha === sumarDias(fecha, 1) && m <= finVentana) ms.push(m + 1440);
+    }
+    if (ms.length > 0) {
+      for (const ch of lista) {
+        const m = aMin(ch.hora.slice(0, 5));
+        if (ch.fecha === sumarDias(fecha, 1) && m <= finVentana) ms.push(m + 1440);
+      }
     }
   } else {
     for (const ch of lista) {
@@ -594,7 +624,10 @@ function ajusteSemana(lista, iniSem, turno) {
     const difEntrada = Math.min(Math.abs(ms[0] - entradaT), 480);
     const salioAntes = Math.min(Math.max(0, salidaT - ms[ms.length - 1]), 480);
     const salioDespues = Math.min(Math.max(0, ms[ms.length - 1] - salidaT), 600);
-    difs.push(difEntrada + salioAntes + 0.1 * salioDespues);
+    // Checadas muy fuera de la ventana del turno (ej. descansos de la mañana siguiente
+    // bajo una interpretación nocturna equivocada) delatan que el turno no es el correcto.
+    const fueraDeVentana = ms.filter(m => m < entradaT - 90 || m > salidaT + 90).length;
+    difs.push(difEntrada + salioAntes + 0.1 * salioDespues + fueraDeVentana * 30);
   }
   if (difs.length < 2) return null; // se necesitan al menos 2 días limpios para opinar
   const score = (difs.reduce((a, b) => a + b, 0) + diasRaros * 120) / difs.length;
@@ -653,4 +686,4 @@ function detectarTurnos(opciones) {
   return sugerencias;
 }
 
-module.exports = { calcularPeriodo, detectarTurnos, inicioDeSemana, sumarDias, diaSemana, aMin, minAHora };
+module.exports = { calcularPeriodo, detectarTurnos, inicioDeSemana, sumarDias, diaSemana, aMin, minAHora, ajusteSemana, checadasDelDia };

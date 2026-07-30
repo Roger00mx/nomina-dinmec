@@ -6,6 +6,7 @@ const crypto = require('crypto');
 
 const store = require('./store');
 const motor = require('./motor');
+const excel = require('./excel');
 
 const PUERTO = process.env.PORT || 3300;
 const PUBLICO = path.join(__dirname, 'public');
@@ -317,6 +318,105 @@ const servidor = http.createServer(async (req, res) => {
 
       if (ruta === '/api/banco' && req.method === 'GET') {
         return json(res, 200, store.leer('banco', {}));
+      }
+
+      // ---- descargas en Excel (mismo formato que la app) ----
+      const horasYMin = h => {
+        if (!h) return '';
+        const total = Math.round(h * 60);
+        const hrs = Math.floor(total / 60), min = total % 60;
+        return hrs === 0 ? `${min} min` : (min === 0 ? `${hrs} h` : `${hrs} h ${min} min`);
+      };
+      const fBonita = iso => iso ? new Date(iso + 'T12:00:00')
+        .toLocaleDateString('es-MX', { day: '2-digit', month: 'short', year: 'numeric' }) : '';
+
+      if (ruta === '/api/excel/nomina' && req.method === 'GET') {
+        const fecha = url.searchParams.get('fecha');
+        if (!fecha) return json(res, 400, { error: 'Falta la fecha' });
+        const p = calcularPago(fecha);
+        const empresa = store.leer('parametros', {}).empresa || '';
+        const filas = [
+          [{ t: 'titulo', v: `${empresa} — Nómina` }],
+          [{ t: 'txt', v: `Pago del ${fBonita(p.fechaPago)} · Grupo ${p.grupoQuincenal} (quincena ${fBonita(p.quincenal.inicio)} al ${fBonita(p.quincenal.fin)}) + Semanal (${fBonita(p.semanal.inicio)} al ${fBonita(p.semanal.fin)})` }],
+          [],
+          ['ID', 'Nombre', 'Grupo', 'Periodo que cobra', 'Sueldo sem.', 'Ret. S1', 'Faltas S1', 'Ret. S2', 'Faltas S2',
+            'Hrs trab.', 'Hrs extra', 'Pago H.E.', 'Descuentos', 'Préstamo', 'NETO', 'Dispersión', 'Efectivo'].map(v => ({ t: 'enc', v })),
+        ];
+        for (const r of p.resumen) {
+          const s1 = r.semanas[0] || {}, s2 = r.semanas[1];
+          filas.push([
+            { t: 'num', v: r.idReloj }, { t: 'txt', v: r.nombre },
+            { t: 'txt', v: r.grupo === 'SEMANAL' ? 'Semanal' : 'Grupo ' + r.grupo },
+            { t: 'txt', v: `${fBonita(r.periodoInicio)} – ${fBonita(r.periodoFin)}` },
+            { t: 'money', v: r.sueldoSemanal },
+            { t: 'txt', v: String(s1.retardos || 0) + (s1.justificadoPor ? ` (just. ${s1.justificadoPor})` : (s1.diasDescuentoRetardos ? ` (−${s1.diasDescuentoRetardos}d)` : '')) },
+            { t: 'num', v: s1.faltas || 0 },
+            { t: 'txt', v: s2 ? String(s2.retardos || 0) + (s2.justificadoPor ? ` (just. ${s2.justificadoPor})` : (s2.diasDescuentoRetardos ? ` (−${s2.diasDescuentoRetardos}d)` : '')) : '—' },
+            { t: 'txt', v: s2 ? String(s2.faltas || 0) : '—' },
+            { t: 'num', v: r.horasTrabajadas },
+            { t: 'txt', v: horasYMin(r.horasExtras) + (r.heDomingo ? ` (dom ${horasYMin(r.heDomingo)})` : '') },
+            { t: 'money', v: r.pagoHE }, { t: 'money', v: -r.descuentos || 0 }, { t: 'money', v: -r.abonoPrestamo || 0 },
+            { t: 'money', v: r.neto }, { t: 'money', v: r.montoDispersion }, { t: 'money', v: r.efectivo },
+          ]);
+        }
+        const tot = c => p.resumen.reduce((s, r) => s + (r[c] || 0), 0);
+        filas.push([
+          { t: 'txtb', v: '' }, { t: 'txtb', v: 'TOTALES' }, { t: 'txtb', v: '' }, { t: 'txtb', v: '' }, { t: 'txtb', v: '' },
+          { t: 'txtb', v: '' }, { t: 'txtb', v: '' }, { t: 'txtb', v: '' }, { t: 'txtb', v: '' },
+          { t: 'txtb', v: String(+tot('horasTrabajadas').toFixed(2)) }, { t: 'txtb', v: horasYMin(tot('horasExtras')) },
+          { t: 'moneyb', v: tot('pagoHE') }, { t: 'moneyb', v: -tot('descuentos') }, { t: 'moneyb', v: -tot('abonoPrestamo') },
+          { t: 'moneyb', v: tot('neto') }, { t: 'moneyb', v: tot('montoDispersion') }, { t: 'moneyb', v: tot('efectivo') },
+        ]);
+        const xlsx = excel.generarXlsx([{
+          nombre: 'Nómina', filas,
+          anchos: [6, 34, 10, 24, 12, 12, 9, 12, 9, 10, 16, 12, 12, 11, 12, 12, 12],
+        }]);
+        res.writeHead(200, {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="nomina_pago_${p.fechaPago}.xlsx"`,
+        });
+        return res.end(xlsx);
+      }
+
+      if (ruta === '/api/excel/detalle' && req.method === 'GET') {
+        const fecha = url.searchParams.get('fecha');
+        if (!fecha) return json(res, 400, { error: 'Falta la fecha' });
+        const p = calcularPago(fecha);
+        const empresa = store.leer('parametros', {}).empresa || '';
+        const filas = [
+          [{ t: 'titulo', v: `${empresa} — Detalle diario` }],
+          [{ t: 'txt', v: `Pago del ${fBonita(p.fechaPago)} (quincenal: ${fBonita(p.quincenal.inicio)} al ${fBonita(p.quincenal.fin)} · semanal: ${fBonita(p.semanal.inicio)} al ${fBonita(p.semanal.fin)})` }],
+          [],
+          ['ID', 'Nombre', 'Fecha', 'Día', 'Turno', 'Entrada', 'Desayuno', 'Comida', 'Salida', '# Chec.',
+            'Retardo', 'Hrs trab.', 'Hrs esp.', 'Hrs extra', 'Alertas'].map(v => ({ t: 'enc', v })),
+        ];
+        for (const d of p.dias) {
+          if (d.numChecadas === 0 && !d.falta && !d.alertas.length) continue;
+          filas.push([
+            { t: 'num', v: d.idReloj }, { t: 'txt', v: d.nombre },
+            { t: 'txt', v: fBonita(d.fecha) }, { t: 'txt', v: d.dia },
+            { t: 'txt', v: d.turno + (d.laboral ? '' : ' (no laboral)') },
+            { t: 'txt', v: d.entrada || '—' },
+            { t: 'txt', v: d.salDesayuno ? `${d.salDesayuno}→${d.regDesayuno} (${d.minDesayuno}m)` : '' },
+            { t: 'txt', v: d.salComida ? `${d.salComida}→${d.regComida} (${d.minComida}m)` : '' },
+            { t: 'txt', v: d.salida || '—' },
+            { t: 'num', v: d.numChecadas },
+            { t: 'txt', v: d.esRetardo ? `Sí${d.retardoMin ? ' +' + d.retardoMin + 'm' : ''}` : (d.laboral && d.numChecadas ? 'No' : '') },
+            { t: 'num', v: d.horasTrabajadas || 0 },
+            { t: 'num', v: d.horasEsperadas || 0 },
+            { t: 'txt', v: horasYMin(d.horasExtras) },
+            { t: 'txt', v: (d.falta ? 'FALTA · ' : '') + d.alertas.join(' · ') },
+          ]);
+        }
+        const xlsx = excel.generarXlsx([{
+          nombre: 'Detalle diario', filas,
+          anchos: [6, 34, 13, 6, 14, 9, 20, 20, 9, 8, 9, 9, 9, 12, 60],
+        }]);
+        res.writeHead(200, {
+          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          'Content-Disposition': `attachment; filename="detalle_diario_${p.fechaPago}.xlsx"`,
+        });
+        return res.end(xlsx);
       }
 
       // Respaldo completo de todos los datos (para migrar a la nube o guardar copia)

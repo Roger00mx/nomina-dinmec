@@ -97,6 +97,7 @@ const PARAMETROS_INICIALES = {
   desayunoMin: 20,             // minutos de desayuno por defecto
   comidaMin: 30,               // minutos de comida por defecto
   olvidoEntradaMin: 60,        // si la 1ª checada llega esto (o más) tarde, se asume olvido de entrada
+  ventanaDobleChecada: 5,      // checadas dobles: se ignora la 2ª si viene a menos de estos minutos
   password: 'dinmec',          // contraseña de acceso (vacío = sin login)
   feriados: [],                // [{ fecha: 'YYYY-MM-DD', descripcion: '' }]
 };

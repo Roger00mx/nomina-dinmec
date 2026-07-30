@@ -270,7 +270,8 @@ VISTAS.nomina = async function () {
         <h2 style="margin:0">Resumen de nómina</h2>
         <span style="flex:1"></span>
         <button class="btn btn-azul" id="btn-recibos">🖨️ Imprimir recibos</button>
-        <button class="btn" id="btn-csv-nomina">⬇️ Nómina CSV</button>
+        <button class="btn btn-azul" id="btn-excel-nomina">📗 Descargar Excel</button>
+        <button class="btn" id="btn-csv-nomina">⬇️ CSV</button>
         <button class="btn" id="btn-csv-dispersion">⬇️ Dispersión CSV</button>
         ${cerrado
           ? '<button class="btn btn-peligro" id="btn-reabrir">Reabrir periodo</button>'
@@ -336,6 +337,9 @@ VISTAS.nomina = async function () {
   }));
 
   $('#btn-recibos').addEventListener('click', imprimirRecibos);
+  $('#btn-excel-nomina').addEventListener('click', () => {
+    window.location.href = '/api/excel/nomina?fecha=' + NOMINA.fechaPago;
+  });
   $('#btn-csv-nomina').addEventListener('click', () => {
     const filas = [['ID', 'Nombre', 'Grupo', 'Periodo inicio', 'Periodo fin', 'Sueldo semanal', 'Retardos', 'Faltas', 'Hrs trabajadas', 'Hrs extra', 'Pago HE', 'Descuentos', 'Abono préstamo', 'Neto', 'Dispersión', 'Efectivo']];
     for (const r of NOMINA.resumen) filas.push([r.idReloj, r.nombre, NOMBRE_GRUPO[r.grupo] || r.grupo, r.periodoInicio, r.periodoFin, r.sueldoSemanal, r.retardos, r.faltas, r.horasTrabajadas, r.horasExtras, r.pagoHE, r.descuentos, r.abonoPrestamo, r.neto, r.montoDispersion, r.efectivo]);
@@ -414,7 +418,12 @@ VISTAS.detalle = async function () {
       <select id="det-emp"><option value="">— Todos (solo días con actividad o alertas) —</option>
         ${EMPLEADOS.filter(e => e.activo).map(e => `<option value="${e.idReloj}">${e.idReloj} — ${esc(e.nombre)}</option>`).join('')}
       </select></div>
-    <label style="align-self:center"><input type="checkbox" id="det-alertas"> Solo con alertas</label>`;
+    <label style="align-self:center"><input type="checkbox" id="det-alertas"> Solo con alertas</label>
+    <span style="flex:1"></span>
+    <button class="btn btn-azul" id="btn-excel-detalle">📗 Descargar Excel</button>`;
+  filtro.querySelector('#btn-excel-detalle').addEventListener('click', () => {
+    window.location.href = '/api/excel/detalle?fecha=' + NOMINA.fechaPago;
+  });
   tarjetaSel.appendChild(filtro);
   cont.appendChild(tarjetaSel);
 
@@ -436,7 +445,7 @@ VISTAS.detalle = async function () {
     if (soloAlertas) dias = dias.filter(d => d.alertas.length || d.falta);
 
     let filas = '';
-    for (const d of dias) {
+    dias.forEach((d, idx) => {
       const clase = d.falta ? 'fila-falta' : (!d.laboral ? 'fila-nolaboral' : '');
       filas += `<tr class="${clase}">
         <td>${d.idReloj}</td><td>${esc(d.nombre)}</td>
@@ -451,9 +460,10 @@ VISTAS.detalle = async function () {
         <td class="num">${d.horasTrabajadas ? d.horasTrabajadas.toFixed(2) : ''}</td>
         <td class="num">${d.horasEsperadas || ''}</td>
         <td class="num">${d.horasExtras ? '<b>' + horasYMin(d.horasExtras) + '</b>' : ''}</td>
+        <td><button class="btn btn-mini btn-editar-dia" data-i="${idx}" title="${d.editadoManual ? 'Editar o quitar la captura manual de este día' : 'Editar entrada/salida de este día a mano'}">${d.editadoManual ? '✏️✔' : '✏️'}</button></td>
         <td class="texto-chico">${d.falta ? '<span class="etiqueta et-rojo">FALTA</span> ' : ''}${d.alertas.filter(a => !a.startsWith('FALTA')).map(esc).join(' · ')}</td>
       </tr>`;
-    }
+    });
 
     tarjetaTabla.innerHTML = `
       <h2>Detalle diario — pago del ${fechaBonita(NOMINA.fechaPago)}
@@ -463,10 +473,71 @@ VISTAS.detalle = async function () {
         <thead><tr>
           <th>ID</th><th>Nombre</th><th>Fecha</th><th>Turno</th><th>Entrada</th>
           <th>Desayuno</th><th>Comida</th><th>Salida</th><th># Chec.</th><th>Retardo</th>
-          <th>Hrs trab.</th><th>Hrs esp.</th><th>Hrs extra</th><th>Alertas</th>
-        </tr></thead><tbody>${filas || '<tr><td colspan="14">Sin datos en este periodo</td></tr>'}</tbody>
+          <th>Hrs trab.</th><th>Hrs esp.</th><th>Hrs extra</th><th>✏️</th><th>Alertas</th>
+        </tr></thead><tbody>${filas || '<tr><td colspan="15">Sin datos en este periodo</td></tr>'}</tbody>
       </table></div>
-      <p class="texto-chico" style="margin-top:8px">* junto a una hora significa que fue asumida (no hubo checada). Los días con fondo rojo son faltas.</p>`;
+      <p class="texto-chico" style="margin-top:8px">* junto a una hora significa que fue asumida (no hubo checada) · ✏ = horario editado a mano · Los días con fondo rojo son faltas.
+        Con el botón ✏️ puedes corregir la entrada/salida de cualquier día (viajes de choferes, salidas avisadas sin checar, etc.).</p>`;
+
+    tarjetaTabla.querySelectorAll('.btn-editar-dia').forEach(btn =>
+      btn.addEventListener('click', () => editarDia(dias[+btn.dataset.i])));
+  }
+
+  // Editor manual de un día: corrige entrada/salida con responsable y nota.
+  // Se guarda como "captura" (la misma de Excepciones, donde también se puede añadir foto).
+  async function editarDia(d) {
+    const fondo = document.createElement('div');
+    fondo.style.cssText = 'position:fixed;inset:0;background:rgba(20,41,63,.6);z-index:150;display:flex;align-items:center;justify-content:center;padding:16px';
+    const limpiar = t => (t || '').replace(/[✏*—]/g, '').trim();
+    fondo.innerHTML = `
+      <div class="tarjeta" style="max-width:430px;width:100%;margin:0">
+        <h2>✏️ Editar día — ${esc(d.nombre)}</h2>
+        <p class="texto-chico" style="margin-bottom:10px">${fechaBonita(d.fecha)} (${d.dia}) · turno ${esc(d.turno)}.
+          El día editado no genera retardo ni falta; las horas de más salen como extra.
+          Si la salida es menor que la entrada, se entiende que salió al día siguiente.</p>
+        <div class="fila-controles">
+          <div class="campo"><label>Entrada</label><input type="time" id="ed-entrada" value="${limpiar(d.entrada)}"></div>
+          <div class="campo"><label>Salida</label><input type="time" id="ed-salida" value="${limpiar(d.salida)}"></div>
+        </div>
+        <div class="fila-controles">
+          <div class="campo"><label>Capturado por (obligatorio)</label><input id="ed-quien" style="width:170px"></div>
+          <div class="campo"><label>Motivo / nota</label><input id="ed-nota" style="width:170px" placeholder="ej. Viaje, salida avisada"></div>
+        </div>
+        <p class="texto-chico">Para adjuntar foto del justificante, usa la sección «Editar horarios» de la pestaña Excepciones.</p>
+        <div class="fila-controles" style="margin-top:10px">
+          <button class="btn btn-primario" id="ed-guardar">💾 Guardar</button>
+          ${d.editadoManual ? '<button class="btn btn-peligro" id="ed-quitar">Quitar edición manual</button>' : ''}
+          <button class="btn" id="ed-cancelar">Cancelar</button>
+          <span id="ed-msg" class="error"></span>
+        </div>
+      </div>`;
+    document.body.appendChild(fondo);
+    fondo.addEventListener('click', e => { if (e.target === fondo) fondo.remove(); });
+    fondo.querySelector('#ed-cancelar').addEventListener('click', () => fondo.remove());
+
+    fondo.querySelector('#ed-guardar').addEventListener('click', async () => {
+      const entrada = fondo.querySelector('#ed-entrada').value;
+      const salida = fondo.querySelector('#ed-salida').value;
+      const quien = fondo.querySelector('#ed-quien').value.trim();
+      if (!entrada || !salida) { fondo.querySelector('#ed-msg').textContent = 'Faltan entrada y salida'; return; }
+      if (!quien) { fondo.querySelector('#ed-msg').textContent = 'Escribe quién captura'; return; }
+      const capturas = await api('/api/capturas');
+      const existente = capturas.find(c => c.idReloj === d.idReloj && c.fecha === d.fecha);
+      const lista = capturas.filter(c => !(c.idReloj === d.idReloj && c.fecha === d.fecha));
+      lista.push({ idReloj: d.idReloj, fecha: d.fecha, entrada, salida, capturadoPor: quien, nota: fondo.querySelector('#ed-nota').value.trim(), foto: existente?.foto || '' });
+      await api('/api/capturas', { method: 'PUT', body: lista });
+      fondo.remove();
+      navegar('detalle');
+    });
+
+    const btnQuitar = fondo.querySelector('#ed-quitar');
+    if (btnQuitar) btnQuitar.addEventListener('click', async () => {
+      if (!confirm('¿Quitar la edición manual? El día volverá a calcularse con las checadas del reloj.')) return;
+      const capturas = await api('/api/capturas');
+      await api('/api/capturas', { method: 'PUT', body: capturas.filter(c => !(c.idReloj === d.idReloj && c.fecha === d.fecha)) });
+      fondo.remove();
+      navegar('detalle');
+    });
   }
 
   filtro.querySelector('#det-emp').addEventListener('change', pintar);
@@ -656,9 +727,10 @@ VISTAS.turnos = async function () {
       <td><input value="${esc(t.codigo)}" data-c="codigo" style="width:120px"></td>
       <td><input type="time" value="${t.horaEntrada}" data-c="horaEntrada"></td>
       <td><input type="time" value="${t.horaSalida}" data-c="horaSalida"></td>
-      <td><input type="number" value="${t.horasDia}" data-c="horasDia" style="width:60px" step="0.5"></td>
+      <td><input type="number" value="${t.horasDia}" data-c="horasDia" style="width:65px" step="0.1"></td>
       <td class="texto-chico">${checks}</td>
       <td style="text-align:center"><input type="checkbox" ${t.cruzaMedianoche ? 'checked' : ''} data-c="cruzaMedianoche"></td>
+      <td style="text-align:center"><input type="checkbox" ${t.descuentaDescansos ? 'checked' : ''} data-c="descuentaDescansos" title="Extra = horas totales − jornada − TODO el tiempo de descansos (no solo el exceso)"></td>
       <td><input value="${esc(t.descripcion || '')}" data-c="descripcion" style="width:200px"></td>
       <td><button class="btn btn-mini btn-peligro btn-quitar">✕</button></td>
     </tr>`;
@@ -672,10 +744,12 @@ VISTAS.turnos = async function () {
         <button class="btn" id="btn-agregar-t">➕ Agregar turno</button>
         <button class="btn btn-primario" id="btn-guardar-t">💾 Guardar cambios</button>
       </div>
-      <p class="texto-chico" style="margin:6px 0 10px"><b>Horas/día</b> son las horas esperadas del turno (incluyendo descansos pagados);
-        lo que pase de ahí cuenta como hora extra. Marca <b>Cruza medianoche</b> para turnos nocturnos.</p>
+      <p class="texto-chico" style="margin:6px 0 10px"><b>Horas/día</b> son las horas esperadas del turno;
+        lo que pase de ahí cuenta como hora extra. Marca <b>Cruza medianoche</b> para turnos nocturnos.
+        <b>Jornada efectiva</b>: descuenta TODO el tiempo de descansos antes de calcular el extra
+        (ej. nocturno: extra = horas totales − 8.4 − tiempo de comida); sin marcar, el descanso permitido va incluido en la jornada.</p>
       <div class="tabla-scroll"><table>
-        <thead><tr><th>Código</th><th>Entrada</th><th>Salida</th><th>Horas/día</th><th>Días laborales</th><th>Cruza medianoche</th><th>Descripción</th><th></th></tr></thead>
+        <thead><tr><th>Código</th><th>Entrada</th><th>Salida</th><th>Horas/día</th><th>Días laborales</th><th>Cruza medianoche</th><th>Jornada efectiva</th><th>Descripción</th><th></th></tr></thead>
         <tbody id="cuerpo-turnos">${TURNOS.map(filaTurno).join('')}</tbody>
       </table></div>
       <div id="msg-turnos"></div>
@@ -698,6 +772,7 @@ VISTAS.turnos = async function () {
       const t = {
         codigo: v('codigo').value.trim(), horaEntrada: v('horaEntrada').value, horaSalida: v('horaSalida').value,
         horasDia: +v('horasDia').value || 8, dias, cruzaMedianoche: v('cruzaMedianoche').checked,
+        descuentaDescansos: v('descuentaDescansos').checked,
         descripcion: v('descripcion').value.trim(),
       };
       if (t.codigo) lista.push(t);
@@ -725,6 +800,7 @@ VISTAS.excepciones = async function () {
     return `<tr>
       <td><select data-c="idReloj">${opcionesEmp(e.idReloj)}</select></td>
       <td><input type="date" value="${e.fecha || ''}" data-c="fecha"></td>
+      <td><input type="date" value="${e.hasta || ''}" data-c="hasta" title="Opcional: hasta qué día aplica (los sábados y domingos del rango se omiten en permisos, incapacidades y vacaciones)"></td>
       <td><select data-c="tipo">${opcionesTipo(e.tipo)}</select></td>
       <td><select data-c="turnoAlternativo">${opcionesTurno(e.turnoAlternativo)}</select></td>
       <td><input value="${esc(e.observacion || '')}" data-c="observacion" style="width:220px"></td>
@@ -830,10 +906,11 @@ VISTAS.excepciones = async function () {
         <button class="btn" id="btn-agregar-e">➕ Agregar</button>
         <button class="btn btn-primario" id="btn-guardar-e">💾 Guardar cambios</button>
       </div>
-      <p class="texto-chico" style="margin:6px 0 10px">Una fila por día con excepción. Si el tipo es Permiso, Incapacidad, Vacaciones o
-        Retardo justificado, ese día <b>no cuenta como falta ni retardo</b>. «Cambio turno» aplica el turno alternativo solo ese día.</p>
+      <p class="texto-chico" style="margin:6px 0 10px">Si el tipo es Permiso, Incapacidad, Vacaciones o Retardo justificado, esos días
+        <b>no cuentan como falta ni retardo</b>. Puedes poner un <b>rango</b> con «Hasta» (ej. incapacidad de varios días): los sábados
+        y domingos dentro del rango se omiten solos, porque no cuentan para permisos ni vacaciones. «Cambio turno» aplica el turno alternativo a cada día del rango.</p>
       <div class="tabla-scroll"><table>
-        <thead><tr><th>Empleado</th><th>Fecha</th><th>Tipo</th><th>Turno alternativo</th><th>Observación</th><th></th></tr></thead>
+        <thead><tr><th>Empleado</th><th>Desde</th><th>Hasta (opcional)</th><th>Tipo</th><th>Turno alternativo</th><th>Observación</th><th></th></tr></thead>
         <tbody id="cuerpo-exc">${excepciones.map(fila).join('')}</tbody>
       </table></div>
       <div id="msg-exc"></div>
@@ -953,7 +1030,8 @@ VISTAS.excepciones = async function () {
     const lista = [];
     for (const tr of document.querySelectorAll('#cuerpo-exc tr')) {
       const v = c => tr.querySelector(`[data-c="${c}"]`);
-      const e = { idReloj: +v('idReloj').value, fecha: v('fecha').value, tipo: v('tipo').value, turnoAlternativo: v('turnoAlternativo').value, observacion: v('observacion').value.trim() };
+      const e = { idReloj: +v('idReloj').value, fecha: v('fecha').value, hasta: v('hasta').value, tipo: v('tipo').value, turnoAlternativo: v('turnoAlternativo').value, observacion: v('observacion').value.trim() };
+      if (e.hasta && e.hasta < e.fecha) e.hasta = e.fecha;
       if (e.idReloj && e.fecha) lista.push(e);
     }
     await api('/api/excepciones', { method: 'PUT', body: lista });
@@ -1073,6 +1151,7 @@ VISTAS.parametros = async function () {
         <div class="campo"><label>Desayuno por defecto (min)</label><input type="number" id="pa-desayuno" value="${p.desayunoMin}" style="width:80px"></div>
         <div class="campo"><label>Comida por defecto (min)</label><input type="number" id="pa-comida" value="${p.comidaMin}" style="width:80px"></div>
         <div class="campo"><label>Olvido de entrada a partir de (min tarde)</label><input type="number" id="pa-olvido" value="${p.olvidoEntradaMin}" style="width:80px"></div>
+        <div class="campo"><label>Checada doble: ignorar la 2ª si viene a menos de (min)</label><input type="number" id="pa-doble" value="${p.ventanaDobleChecada ?? 5}" style="width:80px"></div>
         <div class="campo"><label>Monto de dispersión bancaria</label><input type="number" id="pa-dispersion" value="${p.montoDispersion}" step="0.01" style="width:110px"></div>
       </div>
       <h3>Días feriados</h3>
@@ -1154,6 +1233,7 @@ VISTAS.parametros = async function () {
         desayunoMin: +$('#pa-desayuno').value,
         comidaMin: +$('#pa-comida').value,
         olvidoEntradaMin: +$('#pa-olvido').value,
+        ventanaDobleChecada: +$('#pa-doble').value,
         montoDispersion: +$('#pa-dispersion').value,
         feriados,
       },

@@ -176,4 +176,53 @@ function vacacionesComoExcepciones(filas, empleados) {
   return { excepciones, sinEnlazar: [...sinEnlazarMap.values()] };
 }
 
-module.exports = { traer, traerVacaciones, cruzar, vacacionesComoExcepciones };
+// ---------- horas extra autorizadas, listas para comparar ----------
+// Devuelve { ok, desde, hasta, porId, sinEnlazar }.
+// porId esta indexado por idReloj de nomina: { horasNormales, horasDobles,
+// horasTotales, dias, comidaMinutos, enlacePor }.
+async function horasExtraPorEmpleado(desde, hasta, empleados) {
+  const r = await traer(desde, hasta);
+  if (r.error) return { ok: false, desde, hasta, error: r.error, porId: {}, sinEnlazar: [] };
+
+  const idx = indice(empleados);
+  const porId = {};
+  const sinEnlazar = [];
+
+  for (const f of r.filas) {
+    const dato = {
+      horasNormales: Number(f.he_horas_normales) || 0,
+      horasDobles: Number(f.he_horas_dobles) || 0,
+      dias: Number(f.he_dias) || 0,
+      comidaMinutos: Number(f.he_comida_minutos) || 0,
+    };
+    dato.horasTotales = +(dato.horasNormales + dato.horasDobles).toFixed(2);
+
+    const hit = buscar(idx, f.num_empleado, f.nombre);
+    if (!hit) {
+      // Solo estorba avisar de quien no trae horas extra en el periodo.
+      if (dato.horasTotales > 0 || dato.dias > 0) {
+        sinEnlazar.push({
+          numEmpleado: f.num_empleado == null ? null : f.num_empleado,
+          nombre: f.nombre || '', ...dato,
+        });
+      }
+      continue;
+    }
+
+    const k = String(hit.empleado.idReloj);
+    const previo = porId[k];
+    if (previo) {
+      previo.horasNormales = +(previo.horasNormales + dato.horasNormales).toFixed(2);
+      previo.horasDobles = +(previo.horasDobles + dato.horasDobles).toFixed(2);
+      previo.horasTotales = +(previo.horasNormales + previo.horasDobles).toFixed(2);
+      previo.dias += dato.dias;
+      previo.comidaMinutos += dato.comidaMinutos;
+    } else {
+      porId[k] = { ...dato, enlacePor: hit.via };
+    }
+  }
+
+  return { ok: true, desde, hasta, porId, sinEnlazar };
+}
+
+module.exports = { traer, traerVacaciones, cruzar, vacacionesComoExcepciones, horasExtraPorEmpleado };

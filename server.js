@@ -190,6 +190,28 @@ async function calcularPago(fecha) {
     fechaInicio: motor.sumarDias(fechaPago, -14), numSemanas: 2,
   });
 
+  // Horas extra AUTORIZADAS en dinmec-app, para el periodo exacto que cobra cada grupo.
+  // Solo se muestran para comparar: no cambian ningun calculo.
+  const heSemanal = await dinmec.horasExtraPorEmpleado(resSemanal.fechaInicio, resSemanal.fechaFin, empleados);
+  const heQuincenal = await dinmec.horasExtraPorEmpleado(resQuincenal.fechaInicio, resQuincenal.fechaFin, empleados);
+  if (heSemanal.error) console.error('Horas extra de dinmec-app (semanal):', heSemanal.error);
+  if (heQuincenal.error) console.error('Horas extra de dinmec-app (quincenal):', heQuincenal.error);
+
+  const conHE = (r, fuente) => {
+    const d = fuente.porId[String(r.idReloj)] || null;
+    const autorizadas = d ? d.horasTotales : 0;
+    return {
+      ...r,
+      heDinmec: autorizadas,
+      heDinmecNormales: d ? d.horasNormales : 0,
+      heDinmecDobles: d ? d.horasDobles : 0,
+      heDinmecDias: d ? d.dias : 0,
+      heDinmecComidaMin: d ? d.comidaMinutos : 0,
+      heDinmecOk: !!fuente.ok,
+      heDiferencia: +(((r.horasExtras || 0) - autorizadas)).toFixed(2),
+    };
+  };
+
   // Detector de turnos: revisa las 2 últimas semanas de TODOS los empleados activos
   // y sugiere el turno que mejor encaja cuando las checadas no cuadran con el asignado.
   const sugerencias = motor.detectarTurnos({
@@ -204,8 +226,12 @@ async function calcularPago(fecha) {
     sugerencias,
     semanal: { inicio: resSemanal.fechaInicio, fin: resSemanal.fechaFin, empleados: semanales.length },
     quincenal: { inicio: resQuincenal.fechaInicio, fin: resQuincenal.fechaFin, empleados: quincenales.length },
-    resumen: [...resSemanal.resumen.map(r => ({ ...r, grupo: 'SEMANAL' })),
-              ...resQuincenal.resumen.map(r => ({ ...r, grupo: grupoQuincenal }))],
+    horasExtraDinmec: {
+      semanal: { ok: heSemanal.ok, desde: heSemanal.desde, hasta: heSemanal.hasta, error: heSemanal.error || null, sinEnlazar: heSemanal.sinEnlazar },
+      quincenal: { ok: heQuincenal.ok, desde: heQuincenal.desde, hasta: heQuincenal.hasta, error: heQuincenal.error || null, sinEnlazar: heQuincenal.sinEnlazar },
+    },
+    resumen: [...resSemanal.resumen.map(r => conHE({ ...r, grupo: 'SEMANAL' }, heSemanal)),
+              ...resQuincenal.resumen.map(r => conHE({ ...r, grupo: grupoQuincenal }, heQuincenal))],
     dias: [...resSemanal.dias, ...resQuincenal.dias],
     noCobranHoy: empleados.filter(e => grupoDe(e) !== 'SEMANAL' && grupoDe(e) !== grupoQuincenal)
       .map(e => ({ idReloj: e.idReloj, nombre: e.nombre, grupo: grupoDe(e) })),
@@ -386,7 +412,7 @@ const servidor = http.createServer(async (req, res) => {
           [{ t: 'txt', v: `Pago del ${fBonita(p.fechaPago)} · Grupo ${p.grupoQuincenal} (quincena ${fBonita(p.quincenal.inicio)} al ${fBonita(p.quincenal.fin)}) + Semanal (${fBonita(p.semanal.inicio)} al ${fBonita(p.semanal.fin)})` }],
           [],
           ['ID', 'Nombre', 'Grupo', 'Periodo que cobra', 'Sueldo sem.', 'Ret. S1', 'Faltas S1', 'Ret. S2', 'Faltas S2',
-            'Hrs trab.', 'Hrs extra', 'Pago H.E.', 'Descuentos', 'Préstamo', 'NETO', 'Dispersión', 'Efectivo'].map(v => ({ t: 'enc', v })),
+            'Hrs trab.', 'Hrs extra reloj', 'H.E. autorizadas', 'Dif.', 'Pago H.E.', 'Descuentos', 'Préstamo', 'NETO', 'Dispersión', 'Efectivo'].map(v => ({ t: 'enc', v })),
         ];
         for (const r of p.resumen) {
           const s1 = r.semanas[0] || {}, s2 = r.semanas[1];
@@ -401,6 +427,8 @@ const servidor = http.createServer(async (req, res) => {
             { t: 'txt', v: s2 ? String(s2.faltas || 0) : '—' },
             { t: 'num', v: r.horasTrabajadas },
             { t: 'txt', v: horasYMin(r.horasExtras) + (r.heDomingo ? ` (dom ${horasYMin(r.heDomingo)})` : '') },
+            { t: 'txt', v: !r.heDinmecOk ? 'sin datos' : (horasYMin(r.heDinmec) || '—') + (r.heDinmecDias ? ` (${r.heDinmecDias} d)` : '') },
+            { t: 'txt', v: !r.heDinmecOk ? '' : (r.heDiferencia === 0 ? '=' : (r.heDiferencia > 0 ? '+' : '−') + horasYMin(Math.abs(r.heDiferencia))) },
             { t: 'money', v: r.pagoHE }, { t: 'money', v: -r.descuentos || 0 }, { t: 'money', v: -r.abonoPrestamo || 0 },
             { t: 'money', v: r.neto }, { t: 'money', v: r.montoDispersion }, { t: 'money', v: r.efectivo },
           ]);
@@ -410,12 +438,13 @@ const servidor = http.createServer(async (req, res) => {
           { t: 'txtb', v: '' }, { t: 'txtb', v: 'TOTALES' }, { t: 'txtb', v: '' }, { t: 'txtb', v: '' }, { t: 'txtb', v: '' },
           { t: 'txtb', v: '' }, { t: 'txtb', v: '' }, { t: 'txtb', v: '' }, { t: 'txtb', v: '' },
           { t: 'txtb', v: String(+tot('horasTrabajadas').toFixed(2)) }, { t: 'txtb', v: horasYMin(tot('horasExtras')) },
+          { t: 'txtb', v: horasYMin(tot('heDinmec')) }, { t: 'txtb', v: '' },
           { t: 'moneyb', v: tot('pagoHE') }, { t: 'moneyb', v: -tot('descuentos') }, { t: 'moneyb', v: -tot('abonoPrestamo') },
           { t: 'moneyb', v: tot('neto') }, { t: 'moneyb', v: tot('montoDispersion') }, { t: 'moneyb', v: tot('efectivo') },
         ]);
         const xlsx = excel.generarXlsx([{
           nombre: 'Nómina', filas,
-          anchos: [6, 34, 10, 24, 12, 12, 9, 12, 9, 10, 16, 12, 12, 11, 12, 12, 12],
+          anchos: [6, 34, 10, 24, 12, 12, 9, 12, 9, 10, 16, 17, 9, 12, 12, 11, 12, 12, 12],
         }]);
         res.writeHead(200, {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

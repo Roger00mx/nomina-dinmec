@@ -121,23 +121,54 @@ function datosBase() {
   };
 }
 
-function calcularNomina(fechaInicio, numSemanas) {
+// Los dias de vacaciones autorizados en dinmec-app se convierten en excepciones
+// tipo 'Vacaciones': ese dia deja de contar como falta y como retardo.
+// Las excepciones capturadas a mano AQUI van despues, asi que mandan sobre las
+// automaticas. Si Supabase no responde, la nomina sigue con lo capturado a mano.
+async function baseConVacaciones(desde, hasta) {
   const base = datosBase();
-  const inicio = motor.inicioDeSemana(fechaInicio, base.parametros.diaInicioSemana || 5);
-  return motor.calcularPeriodo({
-    ...base,
-    fechaInicio: inicio,
-    numSemanas: numSemanas === 2 ? 2 : 1,
-    empleados: store.leer('empleados', []),
-  });
+  const r = await dinmec.traerVacaciones(desde, hasta);
+  if (r.error) {
+    console.error('Vacaciones de dinmec-app:', r.error);
+    return { base, vacaciones: { ok: false, desde, hasta, aplicadas: 0, sinEnlazar: [], error: r.error } };
+  }
+  const cruce = dinmec.vacacionesComoExcepciones(r.filas, store.leer('empleados', []));
+  base.excepciones = [...cruce.excepciones, ...base.excepciones];
+  return {
+    base,
+    vacaciones: {
+      ok: true, desde, hasta,
+      recibidas: r.filas.length,
+      aplicadas: cruce.excepciones.length,
+      sinEnlazar: cruce.sinEnlazar,
+    },
+  };
+}
+
+async function calcularNomina(fechaInicio, numSemanas) {
+  const semanas = numSemanas === 2 ? 2 : 1;
+  const parametros = store.leer('parametros', {});
+  const inicio = motor.inicioDeSemana(fechaInicio, parametros.diaInicioSemana || 5);
+  const fin = motor.sumarDias(inicio, semanas * 7 - 1);
+  const { base, vacaciones } = await baseConVacaciones(inicio, fin);
+  return {
+    ...motor.calcularPeriodo({
+      ...base,
+      fechaInicio: inicio,
+      numSemanas: semanas,
+      empleados: store.leer('empleados', []),
+    }),
+    vacacionesDinmec: vacaciones,
+  };
 }
 
 // Cálculo por FECHA DE PAGO: ese viernes cobran los del grupo SEMANAL (1 semana)
 // más el grupo quincenal (A o B) al que le toque, alternando cada semana.
-function calcularPago(fecha) {
-  const base = datosBase();
-  const diaInicio = base.parametros.diaInicioSemana || 5;
+async function calcularPago(fecha) {
+  const diaInicio = store.leer('parametros', {}).diaInicioSemana || 5;
   const fechaPago = motor.inicioDeSemana(fecha, diaInicio);
+  // El periodo mas largo que se paga ese dia es la quincena: 14 dias hacia atras.
+  const { base, vacaciones } = await baseConVacaciones(motor.sumarDias(fechaPago, -14), fechaPago);
   const empleados = store.leer('empleados', []).filter(e => e.activo);
 
   // ¿A qué grupo quincenal le toca? Se alterna semana a semana desde la fecha ancla del grupo A.
@@ -169,6 +200,7 @@ function calcularPago(fecha) {
   return {
     fechaPago,
     grupoQuincenal,
+    vacacionesDinmec: vacaciones,
     sugerencias,
     semanal: { inicio: resSemanal.fechaInicio, fin: resSemanal.fechaFin, empleados: semanales.length },
     quincenal: { inicio: resQuincenal.fechaInicio, fin: resQuincenal.fechaFin, empleados: quincenales.length },
@@ -181,9 +213,9 @@ function calcularPago(fecha) {
 }
 
 // ---------- cerrar pago (aplica banco de horas y abonos de préstamos) ----------
-function cerrarPeriodo(fecha) {
+async function cerrarPeriodo(fecha) {
   const periodos = store.leer('periodos', []);
-  const resultado = calcularPago(fecha);
+  const resultado = await calcularPago(fecha);
   if (periodos.some(p => p.fechaPago === resultado.fechaPago)) {
     return { error: 'Este pago ya fue cerrado. Reábrelo primero si necesitas corregirlo.' };
   }
@@ -320,7 +352,7 @@ const servidor = http.createServer(async (req, res) => {
       if (ruta === '/api/banco' && req.method === 'GET') {
         return json(res, 200, store.leer('banco', {}));
       }
-      
+
       // ---- datos que vienen de dinmec-app (horas extra y vacaciones autorizadas) ----
       if (ruta === '/api/dinmec' && req.method === 'GET') {
         const desde = url.searchParams.get('desde');
@@ -347,7 +379,7 @@ const servidor = http.createServer(async (req, res) => {
       if (ruta === '/api/excel/nomina' && req.method === 'GET') {
         const fecha = url.searchParams.get('fecha');
         if (!fecha) return json(res, 400, { error: 'Falta la fecha' });
-        const p = calcularPago(fecha);
+        const p = await calcularPago(fecha);
         const empresa = store.leer('parametros', {}).empresa || '';
         const filas = [
           [{ t: 'titulo', v: `${empresa} — Nómina` }],
@@ -395,7 +427,7 @@ const servidor = http.createServer(async (req, res) => {
       if (ruta === '/api/excel/detalle' && req.method === 'GET') {
         const fecha = url.searchParams.get('fecha');
         if (!fecha) return json(res, 400, { error: 'Falta la fecha' });
-        const p = calcularPago(fecha);
+        const p = await calcularPago(fecha);
         const empresa = store.leer('parametros', {}).empresa || '';
         const filas = [
           [{ t: 'titulo', v: `${empresa} — Detalle diario` }],
@@ -513,13 +545,13 @@ const servidor = http.createServer(async (req, res) => {
         const inicio = url.searchParams.get('inicio');
         const semanas = parseInt(url.searchParams.get('semanas') || '2', 10);
         if (!inicio) return json(res, 400, { error: 'Falta la fecha de inicio' });
-        return json(res, 200, calcularNomina(inicio, semanas));
+        return json(res, 200, await calcularNomina(inicio, semanas));
       }
 
       if (ruta === '/api/pago' && req.method === 'GET') {
         const fecha = url.searchParams.get('fecha');
         if (!fecha) return json(res, 400, { error: 'Falta la fecha de pago' });
-        return json(res, 200, calcularPago(fecha));
+        return json(res, 200, await calcularPago(fecha));
       }
 
       if (ruta === '/api/periodos' && req.method === 'GET') {
@@ -530,7 +562,7 @@ const servidor = http.createServer(async (req, res) => {
 
       if (ruta === '/api/periodos/cerrar' && req.method === 'POST') {
         const { fecha } = await leerCuerpo(req);
-        const r = cerrarPeriodo(fecha);
+        const r = await cerrarPeriodo(fecha);
         return json(res, r.error ? 400 : 200, r);
       }
 

@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const store = require('./store');
 const motor = require('./motor');
 const excel = require('./excel');
+const dinmec = require('./dinmec');
 
 const PUERTO = process.env.PORT || 3300;
 const PUBLICO = path.join(__dirname, 'public');
@@ -318,6 +319,19 @@ const servidor = http.createServer(async (req, res) => {
 
       if (ruta === '/api/banco' && req.method === 'GET') {
         return json(res, 200, store.leer('banco', {}));
+      }
+      
+      // ---- datos que vienen de dinmec-app (horas extra y vacaciones autorizadas) ----
+      if (ruta === '/api/dinmec' && req.method === 'GET') {
+        const desde = url.searchParams.get('desde');
+        const hasta = url.searchParams.get('hasta');
+        if (!desde || !hasta) return json(res, 400, { error: 'Faltan las fechas desde y hasta' });
+        const r = await dinmec.traer(desde, hasta);
+        if (r.error) return json(res, 502, { error: r.error });
+        return json(res, 200, {
+          desde, hasta, total: r.filas.length,
+          ...dinmec.cruzar(r.filas, store.leer('empleados', [])),
+        });
       }
 
       // ---- descargas en Excel (mismo formato que la app) ----

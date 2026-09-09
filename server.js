@@ -406,7 +406,12 @@ const servidor = http.createServer(async (req, res) => {
         fechaInicio: inicio,
         numSemanas: semanas,
       });
-
+      // Hasta que dia hay checadas importadas: los dias posteriores NO son falta,
+      // simplemente todavia no se sube el archivo del reloj.
+      let ultimaChecada = null;
+      for (const c of (base.checadas || [])) {
+        if (!ultimaChecada || c.fecha > ultimaChecada) ultimaChecada = c.fecha;
+      }
       const res0 = r.resumen[0] || {};
       const semanasLimpias = (res0.semanas || []).map(sm => ({
         inicio: sm.inicio, fin: sm.fin,
@@ -425,6 +430,7 @@ const servidor = http.createServer(async (req, res) => {
         nombre: emp.nombre,
         puesto: emp.puesto || '',
         inicio, fin, semanas,
+        ultimaChecada,
         totales: {
           retardos: semanasLimpias.reduce((a, b) => a + b.retardos, 0),
           faltas: semanasLimpias.reduce((a, b) => a + b.faltas, 0),

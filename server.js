@@ -347,6 +347,115 @@ const servidor = http.createServer(async (req, res) => {
     if (ruta === '/api/sesion') {
       return json(res, 200, { conectado: tieneAcceso(req), empresa: store.leer('parametros', {}).empresa || '' });
     }
+    
+    // ---- asistencia de UN trabajador, para que la vea el en dinmec-app ----
+    // No usa la sesion de nomina (viene de otro dominio): se protege con el
+    // token TOKEN_ASISTENCIA y con la lista de origenes ORIGENES_ASISTENCIA.
+    // NUNCA devuelve sueldos ni montos: solo horarios, retardos y horas.
+    if (ruta === '/api/asistencia') {
+      const origen = req.headers.origin || '';
+      const permitidos = (process.env.ORIGENES_ASISTENCIA || '')
+        .split(',').map(x => x.trim()).filter(Boolean);
+      const okOrigen = permitidos.length === 0 || (origen && permitidos.includes(origen));
+
+      res.setHeader('Access-Control-Allow-Origin', permitidos.length ? (okOrigen ? origen : 'null') : '*');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-token-asistencia');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      res.setHeader('Vary', 'Origin');
+
+      if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+      if (req.method !== 'GET') return json(res, 405, { error: 'Metodo no permitido' });
+
+      const esperado = process.env.TOKEN_ASISTENCIA || '';
+      if (!esperado) return json(res, 503, { error: 'Falta la variable TOKEN_ASISTENCIA en Render.' });
+      const recibido = req.headers['x-token-asistencia'] || url.searchParams.get('token') || '';
+      if (recibido !== esperado) return json(res, 401, { error: 'Token invalido' });
+      if (!okOrigen) return json(res, 403, { error: 'Origen no permitido' });
+
+      const soloDigitos = v => {
+        const t = String(v == null ? '' : v).replace(/\D/g, '');
+        return t ? String(parseInt(t, 10)) : '';
+      };
+      const num = soloDigitos(url.searchParams.get('num'));
+      if (!num) return json(res, 400, { error: 'Falta el numero de trabajador' });
+
+      const parametros = store.leer('parametros', {});
+      const diaInicio = parametros.diaInicioSemana || 5;
+      const ahora = new Date();
+      const hoyISO = `${ahora.getFullYear()}-${String(ahora.getMonth() + 1).padStart(2, '0')}-${String(ahora.getDate()).padStart(2, '0')}`;
+      const pedida = url.searchParams.get('desde') || hoyISO;
+      const semanas = url.searchParams.get('semanas') === '2' ? 2 : 1;
+      const inicio = motor.inicioDeSemana(pedida, diaInicio);
+      const fin = motor.sumarDias(inicio, semanas * 7 - 1);
+
+      const empleados = store.leer('empleados', []);
+      const emp = empleados.find(e => soloDigitos(e.idReloj) === num)
+               || empleados.find(e => soloDigitos(e.numEmpleado) === num);
+      if (!emp) {
+        return json(res, 404, {
+          error: 'El numero ' + num + ' no esta dado de alta en la app de nomina.',
+          inicio, fin,
+        });
+      }
+
+      const { base, vacaciones } = await baseConVacaciones(inicio, fin);
+      const r = motor.calcularPeriodo({
+        ...base,
+        empleados: [{ ...emp, activo: true }],
+        fechaInicio: inicio,
+        numSemanas: semanas,
+      });
+
+      const res0 = r.resumen[0] || {};
+      const semanasLimpias = (res0.semanas || []).map(sm => ({
+        inicio: sm.inicio, fin: sm.fin,
+        retardos: sm.retardos || 0,
+        faltas: sm.faltas || 0,
+        horasTrabajadas: sm.horasTrabajadas || 0,
+        horasExtras: sm.horasExtras || 0,
+        heDomingo: sm.heDomingo || 0,
+        diasTrabajados: sm.diasTrabajados || 0,
+        diasDescuentoRetardos: sm.diasDescuentoRetardos || 0,
+      }));
+
+      // Se manda SOLO lo que el trabajador necesita ver. Nada de dinero.
+      return json(res, 200, {
+        num: emp.idReloj,
+        nombre: emp.nombre,
+        puesto: emp.puesto || '',
+        inicio, fin, semanas,
+        totales: {
+          retardos: semanasLimpias.reduce((a, b) => a + b.retardos, 0),
+          faltas: semanasLimpias.reduce((a, b) => a + b.faltas, 0),
+          horasTrabajadas: +semanasLimpias.reduce((a, b) => a + b.horasTrabajadas, 0).toFixed(2),
+          horasExtras: +semanasLimpias.reduce((a, b) => a + b.horasExtras, 0).toFixed(2),
+          heDomingo: +semanasLimpias.reduce((a, b) => a + b.heDomingo, 0).toFixed(2),
+          diasDescuentoRetardos: semanasLimpias.reduce((a, b) => a + b.diasDescuentoRetardos, 0),
+        },
+        semanasDetalle: semanasLimpias,
+        reglas: {
+          toleranciaMin: parametros.toleranciaMin ?? 5,
+          retardosPorFalta: parametros.retardosPorFalta ?? 3,
+          umbralHorasExtra: parametros.umbralHorasExtra ?? 0.5,
+        },
+        vacacionesDinmec: { ok: vacaciones.ok, aplicadas: vacaciones.aplicadas },
+        dias: (r.dias || []).map(d => ({
+          fecha: d.fecha, dia: d.dia, turno: d.turno,
+          laboral: d.laboral, feriado: d.feriado,
+          entrada: d.entrada, salida: d.salida,
+          salDesayuno: d.salDesayuno, regDesayuno: d.regDesayuno,
+          salComida: d.salComida, regComida: d.regComida,
+          numChecadas: d.numChecadas,
+          esRetardo: d.esRetardo, retardoMin: d.retardoMin,
+          falta: d.falta, excepcion: d.excepcion || '',
+          horasTrabajadas: d.horasTrabajadas,
+          horasEsperadas: d.horasEsperadas,
+          horasExtras: d.horasExtras,
+          alertas: d.alertas || [],
+        })),
+      });
+    }
 
     // ---- API protegida ----
     if (ruta.startsWith('/api/')) {

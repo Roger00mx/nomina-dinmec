@@ -692,49 +692,115 @@ VISTAS.detalle = async function () {
   const empGuardado = sessionStorage.getItem('det-emp') || '';
   filtro.querySelector('#det-emp').value = empGuardado;
 
+  // Formatos de dinmec-app (H.E., permisos, vacaciones) por "id_fecha"; si no responde, el detalle sigue sin ellos.
+  let FDIA = {}, FERR = '';
+  try {
+    const F = await api(`/api/formatos?fecha=${NOMINA.fechaPago}`);
+    if (!F.dinmecOk) FERR = F.dinmecError || 'sin conexión';
+    for (const e of F.empleados) for (const x of e.filas) {
+      FDIA[e.idReloj + '_' + x.fecha] = { ...x, tareas: e.he.filter(t => t.fecha === x.fecha) };
+    }
+  } catch (err) { FERR = err.message; }
+
+  const hm = h => h ? horasYMin(h) : '';
+  const descansoTxt = (sal, reg, min, nom) => sal ? `${nom} ${sal}${reg ? '→' + reg : ''}${min ? ` (${min}m)` : ''}` : '';
+
   function pintar() {
     const emp = filtro.querySelector('#det-emp').value;
     sessionStorage.setItem('det-emp', emp);
     const soloAlertas = filtro.querySelector('#det-alertas').checked;
     let dias = NOMINA.dias;
     if (emp) dias = dias.filter(d => d.idReloj == emp);
-    else dias = dias.filter(d => d.numChecadas > 0 || d.falta || d.alertas.length);
-    if (soloAlertas) dias = dias.filter(d => d.alertas.length || d.falta);
+    else dias = dias.filter(d => d.numChecadas > 0 || d.falta || d.alertas.length || FDIA[d.idReloj + '_' + d.fecha]?.folios?.length);
+    if (soloAlertas) dias = dias.filter(d => d.alertas.length || d.falta || d.horasDebe);
 
+    const COLS = 12;
     let filas = '';
+    let tot = null;
+    const cerrarTotales = () => {
+      if (!tot || tot.n < 2) return '';
+      const neto = +(tot.heAut - tot.debe).toFixed(2);
+      return `<tr class="fila-total" style="background:#eef2f7;font-weight:600">
+        <td colspan="2">Totales ${esc(tot.nombre)} · ${tot.faltas} falta(s) · ${tot.retardos} retardo(s)</td>
+        <td></td><td class="num">${tot.trab.toFixed(2)}</td><td class="num">${tot.esp}</td>
+        <td class="num" style="color:${tot.debe ? '#c0392b' : ''}">${tot.debe ? 'Debe ' + horasYMin(tot.debe) : ''}</td>
+        <td class="num">${hm(tot.heReloj)}</td><td class="num">${hm(tot.heForm)}</td><td class="num">${hm(tot.heAut)}</td>
+        <td colspan="${COLS - 9}" class="texto-chico" style="white-space:normal">${tot.debe ? `H.E. autorizadas − horas que debe = <b>${neto >= 0 ? horasYMin(neto) : '−' + horasYMin(-neto)}</b>
+          (si se compensan con sus extras o con su banco de horas)` : ''}</td></tr>`;
+    };
     dias.forEach((d, idx) => {
+      if (!tot || tot.id !== d.idReloj) {
+        filas += cerrarTotales();
+        tot = { id: d.idReloj, nombre: d.nombre, n: 0, trab: 0, esp: 0, debe: 0, heReloj: 0, heForm: 0, heAut: 0, faltas: 0, retardos: 0 };
+      }
+      const f = FDIA[d.idReloj + '_' + d.fecha] || {};
+      const heReloj = d.horasExtrasReloj ?? d.horasExtras;
+      tot.n++; tot.trab += d.horasTrabajadas || 0; tot.esp += d.horasEsperadas || 0; tot.debe += d.horasDebe || 0;
+      tot.heReloj += heReloj || 0; tot.heForm += f.horasFormato || 0; tot.heAut += d.horasExtras || 0;
+      tot.faltas += d.falta ? 1 : 0; tot.retardos += d.esRetardo ? 1 : 0;
+
       const clase = d.falta ? 'fila-falta' : (!d.laboral ? 'fila-nolaboral' : '');
+      const chec = (d.checadas || []);
+      const descansos = [descansoTxt(d.salDesayuno, d.regDesayuno, d.minDesayuno, 'Des.'), descansoTxt(d.salComida, d.regComida, d.minComida, 'Com.')].filter(Boolean).join(' · ');
+
+      // Qué hizo el día: trabajadas contra jornada
+      let resumenDia = '';
+      if (d.horasDebe) {
+        resumenDia = `<span class="etiqueta et-rojo">Debe ${horasYMin(d.horasDebe)}</span>
+          <div class="texto-chico">Trabajó ${horasYMin(d.horasTrabajadas)} de ${horasYMin(d.horasEsperadas)}: se descuenta de sus H.E. o del banco de horas</div>`;
+      } else if (d.laboral && d.horasTrabajadas && d.horasTrabajadas > d.horasEsperadas + 0.08) {
+        resumenDia = `<span class="texto-chico">+${horasYMin(+(d.horasTrabajadas - d.horasEsperadas).toFixed(2))} sobre jornada</span>`;
+      } else if (d.laboral && d.horasTrabajadas) resumenDia = '<span class="etiqueta et-verde">Completa</span>';
+
+      // Formato del día: horario que capturó el operador
+      const tareas = (f.tareas || []).map(t => `<div style="white-space:nowrap">${esc(t.horaInicio || '?')}→${esc(t.horaFin || '?')} <b>${t.horas != null ? horasYMin(t.horas) : ''}</b>
+        <span class="texto-chico">${esc(t.folio)}${t.firme ? '' : ' · sin autorizar'}</span></div>`).join('');
+
+      // Permisos, vacaciones y excepciones
+      const marcas = [];
+      if (f.vacaciones || d.excepcion === 'Vacaciones') marcas.push('<span class="etiqueta et-azul">🏖 Vacaciones</span>');
+      (f.permisos || []).forEach(b => marcas.push(`<span class="etiqueta et-ambar">🚪 Permiso ${esc(b.horaSalida || '')}–${esc(b.horaRegreso || '')}</span>
+        <div class="texto-chico">${esc(b.folio)} · ${b.pagaHoras ? 'se pagan' : 'las repone'}${b.reposicion?.length ? ': ' + b.reposicion.map(r => fechaBonita(r.del) + ' ' + (r.entrada || '') + '–' + (r.salida || '')).join(', ') : ''}</div>`));
+      if (d.excepcion && d.excepcion !== 'Vacaciones') marcas.push(`<span class="etiqueta et-azul">${esc(d.excepcion)}</span>`);
+      if (d.minPermisos) marcas.push(`<div class="texto-chico">Salió ${d.minPermisos} min (checadas)</div>`);
+      if (f.decision) marcas.push(`<div class="texto-chico">${f.decision.usar === 'formato' ? '✔ H.E. autorizadas por formato' : '🔗 Emparejado con reloj'}${f.decision.nota ? ': ' + esc(f.decision.nota) : ''}</div>`);
+
       filas += `<tr class="${clase}">
-        <td>${d.idReloj}</td><td>${esc(d.nombre)}</td>
-        <td>${fechaBonita(d.fecha)} <b>${d.dia}</b></td>
-        <td>${esc(d.turno)}${d.laboral ? '' : ' <span class="etiqueta et-azul">No laboral</span>'}${d.excepcion ? ` <span class="etiqueta et-azul">${esc(d.excepcion)}</span>` : ''}</td>
-        <td>${d.entrada || '—'}</td>
-        <td class="texto-chico">${d.salDesayuno || ''}${d.regDesayuno ? '→' + d.regDesayuno : ''} ${d.minDesayuno ? `(${d.minDesayuno}m)` : ''}</td>
-        <td class="texto-chico">${d.salComida || ''}${d.regComida ? '→' + d.regComida : ''} ${d.minComida ? `(${d.minComida}m)` : ''}</td>
-        <td>${d.salida || '—'}</td>
-        <td class="num">${d.numChecadas}</td>
-        <td class="num">${d.esRetardo ? `<span class="etiqueta et-rojo">Sí${d.retardoMin ? ' +' + d.retardoMin + 'm' : ''}</span>` : (d.laboral && d.numChecadas ? '<span class="etiqueta et-verde">No</span>' : '')}</td>
+        <td style="white-space:normal;min-width:120px;max-width:170px"><b>${d.idReloj}</b> ${esc(d.nombre)}</td>
+        <td style="white-space:nowrap"><b>${d.dia}</b> ${fechaBonita(d.fecha)}
+          <div class="texto-chico">${esc(d.turno)}${d.laboral ? '' : ' · No laboral'}${d.feriado ? ' · Feriado' : ''}</div></td>
+        <td style="white-space:normal;min-width:170px;max-width:240px">${d.entrada || d.salida ? `<b style="white-space:nowrap">${d.entrada || '—'} → ${d.salida || '—'}</b>` : (d.falta ? '<span class="etiqueta et-rojo">FALTA</span>' : '—')}
+          ${chec.length ? `<div class="texto-chico" title="Todas las checadas del reloj">${chec.length} chec.: ${chec.map(esc).join(' · ')}</div>` : ''}
+          ${descansos ? `<div class="texto-chico">${descansos}</div>` : ''}
+          ${d.esRetardo ? `<span class="etiqueta et-rojo">Retardo${d.retardoMin ? ' +' + d.retardoMin + ' min' : ''}</span>` : ''}</td>
         <td class="num">${d.horasTrabajadas ? d.horasTrabajadas.toFixed(2) : ''}</td>
         <td class="num">${d.horasEsperadas || ''}</td>
+        <td style="white-space:normal;min-width:120px;max-width:170px">${resumenDia}</td>
+        <td class="num">${hm(heReloj)}</td>
+        <td>${tareas || '—'}${f.estado && ESTADO_CONC[f.estado]?.t && f.estado !== 'coincide' ? `<div><span class="etiqueta ${ESTADO_CONC[f.estado].c}">${ESTADO_CONC[f.estado].t}</span></div>` : ''}</td>
         <td class="num">${d.horasExtras ? '<b>' + horasYMin(d.horasExtras) + '</b>' : ''}</td>
+        <td style="white-space:normal;max-width:200px">${marcas.join('') || ''}</td>
         <td><button class="btn btn-mini btn-editar-dia" data-i="${idx}" title="${d.editadoManual ? 'Editar o quitar la captura manual de este día' : 'Editar entrada/salida de este día a mano'}">${d.editadoManual ? '✏️✔' : '✏️'}</button></td>
-        <td class="texto-chico">${d.falta ? '<span class="etiqueta et-rojo">FALTA</span> ' : ''}${d.alertas.filter(a => !a.startsWith('FALTA')).map(esc).join(' · ')}</td>
+        <td class="texto-chico" style="white-space:normal;min-width:180px;max-width:280px">${d.alertas.filter(a => !a.startsWith('FALTA')).map(esc).join(' · ')}</td>
       </tr>`;
     });
+    filas += cerrarTotales();
 
     tarjetaTabla.innerHTML = `
       <h2>Detalle diario — pago del ${fechaBonita(NOMINA.fechaPago)}
         <span class="texto-chico">(quincenal: ${fechaBonita(NOMINA.quincenal.inicio)} al ${fechaBonita(NOMINA.quincenal.fin)} ·
         semanal: ${fechaBonita(NOMINA.semanal.inicio)} al ${fechaBonita(NOMINA.semanal.fin)})</span></h2>
+      ${FERR ? `<div class="aviso aviso-ambar">No se pudieron traer los formatos de dinmec-app (${esc(FERR)}): se muestra solo lo del reloj.</div>` : ''}
       <div class="tabla-scroll"><table>
         <thead><tr>
-          <th>ID</th><th>Nombre</th><th>Fecha</th><th>Turno</th><th>Entrada</th>
-          <th>Desayuno</th><th>Comida</th><th>Salida</th><th># Chec.</th><th>Retardo</th>
-          <th>Hrs trab.</th><th>Hrs esp.</th><th>Hrs extra</th><th>✏️</th><th>Alertas</th>
-        </tr></thead><tbody>${filas || '<tr><td colspan="15">Sin datos en este periodo</td></tr>'}</tbody>
+          <th>Trabajador</th><th>Día / turno</th><th>Checadas del reloj</th>
+          <th>Hrs trab.</th><th>Jornada</th><th>Resultado del día</th>
+          <th>H.E. reloj</th><th>H.E. formato (horario)</th><th>H.E. autorizada</th><th>Permiso / vacaciones</th><th>✏️</th><th>Alertas</th>
+        </tr></thead><tbody>${filas || `<tr><td colspan="${COLS}">Sin datos en este periodo</td></tr>`}</tbody>
       </table></div>
-      <p class="texto-chico" style="margin-top:8px">* junto a una hora significa que fue asumida (no hubo checada) · ✏ = horario editado a mano · Los días con fondo rojo son faltas.
-        Con el botón ✏️ puedes corregir la entrada/salida de cualquier día (viajes de choferes, salidas avisadas sin checar, etc.).</p>`;
+      <p class="texto-chico" style="margin-top:8px"><b>H.E. reloj</b> = tiempo extra según checadas y turno · <b>H.E. formato</b> = horario que capturó el operador en dinmec-app ·
+        <b>H.E. autorizada</b> = lo que entra a la nómina (incluye lo autorizado por formato en «Formatos vs reloj») · <b>Debe</b> = horas que le faltaron para completar su jornada.
+        * junto a una hora = asumida (no hubo checada) · ✏ = horario editado a mano · ⁺¹ = checada de la madrugada siguiente · Fondo rojo = falta.</p>`;
 
     tarjetaTabla.querySelectorAll('.btn-editar-dia').forEach(btn =>
       btn.addEventListener('click', () => editarDia(dias[+btn.dataset.i])));

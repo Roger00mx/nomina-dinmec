@@ -437,6 +437,8 @@ function calcularPeriodo(opciones) {
 
         const dia = calcularDia(fecha, empleado, turnoDia, minutosDia, exc, parametros, feriados.has(fecha));
         dia.semana = s + 1;
+        // Todas las checadas del día tal cual (⁺¹ = madrugada del día siguiente), para el detalle
+        dia.checadas = minutosDia.map(m => minAHora(m % 1440) + (m >= 1440 ? '⁺¹' : ''));
         if (turnoDetectado && (minutosDia.length > 0 || dia.laboral)) {
           dia.alertas.unshift('🔄 Rotación CNC detectada: ' + turnoDia.codigo);
         }
@@ -481,6 +483,14 @@ function calcularPeriodo(opciones) {
         }
 
         // Conciliación con los formatos de horas extra (última palabra sobre las horas extra del día)
+        // Horas que le faltaron para completar su jornada (día laboral trabajado, sin falta ni día libre).
+        // Informativo: se pueden compensar con sus horas extra o con su banco de horas.
+        dia.horasDebe = 0;
+        if (dia.laboral && !dia.falta && dia.numChecadas > 0 && dia.horasEsperadas > 0
+            && !['Permiso', 'Incapacidad', 'Vacaciones'].includes(dia.excepcion)) {
+          const faltan = dia.horasEsperadas - dia.horasTrabajadas;
+          if (faltan >= 5 / 60) dia.horasDebe = +faltan.toFixed(2);
+        }
         dia.horasExtrasReloj = dia.horasExtras;
         const conc = conciliacion[empleado.idReloj + '_' + fecha];
         if (conc && conc.usar === 'formato' && conc.horas != null && !isNaN(Number(conc.horas))) {

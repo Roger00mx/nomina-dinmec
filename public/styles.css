@@ -133,7 +133,34 @@ td input, td select { padding: 4px 6px; border: 1px solid var(--borde); border-r
 
 /* ---------- recibos (impresión) ---------- */
 #zona-impresion { display: none; }
+/* ---------- dashboard ---------- */
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.dash-grid .tarjeta { margin: 0; }
+.dash-grid h3 { font-size: 15px; color: var(--azul); margin-bottom: 4px; }
+.dash-sub { font-size: 12px; color: #667; margin-bottom: 10px; }
+.rank { list-style: none; }
+.rank li { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--borde); }
+.rank li:last-child { border-bottom: 0; }
+.rank .pos { font-weight: 700; color: var(--naranja); text-align: center; }
+.rank .nom { font-weight: 600; font-size: 13px; }
+.rank .det { font-size: 11.5px; color: #667; }
+.rank .val { font-weight: 700; color: var(--azul); text-align: right; white-space: nowrap; }
+.rank .barra { height: 5px; border-radius: 3px; background: var(--naranja); margin-top: 3px; }
+.barras { display: flex; align-items: flex-end; gap: 6px; height: 190px; padding-top: 18px; overflow-x: auto; }
+.barras .col { flex: 1 0 34px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; }
+.barras .b { width: 100%; max-width: 46px; background: var(--azul); border-radius: 5px 5px 0 0; min-height: 2px; position: relative; }
+.barras .b span { position: absolute; top: -17px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 700; color: var(--azul); white-space: nowrap; }
+.barras .col.mes .b { background: var(--naranja); }
+.barras .col.mes .b span { color: var(--naranja); }
+.barras .et { font-size: 10.5px; color: #667; margin-top: 4px; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chips .etiqueta { font-size: 12px; }
+th.ordenable { cursor: pointer; }
+
 @media print {
+  .dash-print .fila-controles, .dash-print .btn { display: none !important; }
+  .dash-print .tarjeta, .dash-print .kpi { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
+  .dash-print .tabla-scroll { overflow: visible; max-height: none; }
   body > *:not(#zona-impresion) { display: none !important; }
   #zona-impresion { display: block; }
   body { background: #fff; }

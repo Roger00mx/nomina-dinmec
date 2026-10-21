@@ -480,6 +480,18 @@ function pintarFormatos() {
   $('#form-cuerpo').addEventListener('click', manejarClickFormatos);
 }
 
+// Tareas de horas extra del formato para un día, en orden de hora
+const tareasDelDia = (e, fecha) => e.he.filter(t => t.fecha === fecha).sort((a, b) => String(a.horaInicio).localeCompare(String(b.horaInicio)));
+
+// Celda "Horario formato": el horario que capturó el operador en cada tarea, para verlo junto a las checadas
+function celdaFormato(e, x) {
+  const ts = tareasDelDia(e, x.fecha);
+  if (!ts.length) return '—';
+  const lineas = ts.map(t => `<div style="white-space:nowrap"><b>${esc(t.horaInicio || '?')} → ${esc(t.horaFin || 'pendiente')}</b>
+    <span class="texto-chico">${t.horas != null ? horasYMin(t.horas) : ''}${t.comidaMin ? ` (−${t.comidaMin} min comida)` : ''} · ${esc(t.folio)}${t.firme ? '' : ' · sin autorizar'}</span></div>`).join('');
+  return lineas + (ts.length > 1 ? `<div class="texto-chico">Total: <b>${horasYMin(x.horasFormato)}</b></div>` : '');
+}
+
 function filaTrabajadorFormatos(e) {
   const abierto = FORM_ABIERTOS.has(String(e.idReloj));
   const dif = +(e.heFormato - e.heReloj).toFixed(2);
@@ -528,14 +540,14 @@ function detalleTrabajadorFormatos(e) {
     <div style="padding:6px 2px">
       <h3 style="margin:4px 0 8px">Día por día: formato contra reloj</h3>
       ${filas.length ? `<div class="tabla-scroll"><table>
-        <thead><tr><th>Fecha</th><th>Turno</th><th>Checadas</th><th>H.E. reloj</th><th>H.E. formato</th><th>Resultado</th><th>Se paga</th><th>Permiso / vacación</th><th>Acción</th></tr></thead>
+        <thead><tr><th>Fecha</th><th>Turno</th><th>Checadas (reloj)</th><th>H.E. reloj</th><th>Horario formato</th><th>Resultado</th><th>Se paga</th><th>Permiso / vacación</th><th>Acción</th></tr></thead>
         <tbody>${filas.map(x => `<tr>
           <td><b>${x.dia}</b> ${fechaBonita(x.fecha)}</td>
           <td class="texto-chico">${esc(x.turno || '')}${x.laboral ? '' : ' (descanso)'}</td>
-          <td>${x.numChecadas ? `${esc(x.entrada || '—')} → ${esc(x.salida || '—')}` : (x.falta ? '<span class="etiqueta et-rojo">Falta</span>' : '—')}
+          <td style="white-space:nowrap">${x.numChecadas ? `<b>${esc(x.entrada || '—')} → ${esc(x.salida || '—')}</b>` : (x.falta ? '<span class="etiqueta et-rojo">Falta</span>' : '—')}
             ${x.esRetardo ? `<span class="etiqueta et-ambar">Retardo +${x.retardoMin}m</span>` : ''}</td>
           <td>${x.horasExtrasReloj ? horasYMin(x.horasExtrasReloj) : '—'}</td>
-          <td>${x.horasFormato || x.folios.length ? horasYMin(x.horasFormato) + `<div class="texto-chico">${esc(x.folios.join(', '))}${x.formatosPendientes ? ' · sin autorizar en app' : ''}</div>` : '—'}</td>
+          <td>${celdaFormato(e, x)}</td>
           <td>${ESTADO_CONC[x.estado].t ? `<span class="etiqueta ${ESTADO_CONC[x.estado].c}">${ESTADO_CONC[x.estado].t}</span>` : ''}</td>
           <td><b>${x.horasExtrasPagadas ? horasYMin(x.horasExtrasPagadas) : '—'}</b></td>
           <td class="texto-chico">${x.vacaciones ? '🏖 Vacaciones' : ''}${x.permisos.map(b => `🚪 Permiso ${esc(b.horaSalida || '')}–${esc(b.horaRegreso || '')}`).join('<br>')}${x.excepcion && !x.vacaciones ? esc(x.excepcion) : ''}</td>
@@ -614,11 +626,11 @@ function imprimirResumenes(emps, semana) {
         <div><h2>${esc(FORMATOS.empresa)} — Resumen de asistencia y horas extra</h2>
           <div>${esc(e.nombre)} · N° ${e.idReloj} · ${esc(NOMBRE_GRUPO[e.grupo] || e.grupo)} · Periodo ${fechaBonita(ini)} al ${fechaBonita(fin)} · Pago del ${fechaBonita(FORMATOS.fechaPago)}</div></div></div>
       <table>
-        <tr><th>Día</th><th>Turno</th><th>Entrada</th><th>Salida</th><th>Hrs trab.</th><th>H.E. reloj</th><th>H.E. formato</th><th>H.E. pagadas</th><th>Observaciones</th></tr>
+        <tr><th>Día</th><th>Turno</th><th>Entrada</th><th>Salida</th><th>Hrs trab.</th><th>H.E. reloj</th><th>Horario formato</th><th>H.E. pagadas</th><th>Observaciones</th></tr>
         ${filas.map(x => `<tr><td>${x.dia} ${fechaBonita(x.fecha)}</td><td>${esc(x.turno || '')}${x.laboral ? '' : ' (desc.)'}</td>
           <td>${esc(x.entrada || '—')}</td><td>${esc(x.salida || '—')}</td><td class="num">${x.horasTrabajadas ? x.horasTrabajadas.toFixed(2) : '—'}</td>
           <td class="num">${x.horasExtrasReloj ? horasYMin(x.horasExtrasReloj) : '—'}</td>
-          <td class="num">${x.horasFormato ? horasYMin(x.horasFormato) : '—'}${x.folios.length ? '<br><small>' + esc(x.folios.join(', ')) + '</small>' : ''}</td>
+          <td>${tareasDelDia(e, x.fecha).map(t => `${esc(t.horaInicio || '?')}–${esc(t.horaFin || '?')} <b>${t.horas != null ? horasYMin(t.horas) : ''}</b>`).join('<br>') || '—'}${x.folios.length ? '<br><small>' + esc(x.folios.join(', ')) + '</small>' : ''}</td>
           <td class="num"><b>${x.horasExtrasPagadas ? horasYMin(x.horasExtrasPagadas) : '—'}</b></td>
           <td><small>${[x.falta ? 'Falta' : '', x.esRetardo ? `Retardo +${x.retardoMin} min` : '', x.vacaciones ? 'Vacaciones' : '',
             ...x.permisos.map(b => `Permiso ${b.horaSalida || ''}–${b.horaRegreso || ''} (${b.pagaHoras ? 'se paga' : 'repone'})`),

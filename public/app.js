@@ -399,6 +399,251 @@ function imprimirRecibos() {
   window.print();
 }
 
+
+// ============================================================
+// VISTA: FORMATOS DE DINMEC-APP CONTRA EL RELOJ
+// Horas extra (FO-RHS-07), permisos (FO-RHS-08) y vacaciones (FO-RHS-09)
+// de cada trabajador que cobra en la fecha de pago, comparados día por día con el reloj.
+// ============================================================
+const ESTADO_CONC = {
+  coincide:          { t: 'Coincide',                  c: 'et-verde' },
+  formato_mas:       { t: 'Formato con más horas',     c: 'et-rojo' },
+  reloj_mas:         { t: 'Reloj con más horas',       c: 'et-ambar' },
+  sin_checadas:      { t: 'Formato sin checadas',      c: 'et-rojo' },
+  reloj_sin_formato: { t: 'Extra sin formato',         c: 'et-ambar' },
+  sin_extra:         { t: '',                          c: '' },
+};
+let FORMATOS = null;
+const FORM_ABIERTOS = new Set();
+
+VISTAS.formatos = async function () {
+  FORMATOS = await api(`/api/formatos?fecha=${PAGO.fecha}`);
+  PAGO.fecha = FORMATOS.fechaPago;
+  localStorage.setItem('pago', JSON.stringify(PAGO));
+  pintarFormatos();
+};
+
+function pintarFormatos() {
+  const F = FORMATOS;
+  const soloRevisar = localStorage.getItem('form_solo') === '1';
+  const busca = (localStorage.getItem('form_busca') || '').toLowerCase();
+  const conAlgo = e => e.he.length || e.permisos.length || e.vacaciones.length || e.filas.some(x => x.estado !== 'sin_extra');
+  const lista = F.empleados
+    .filter(e => !busca || e.nombre.toLowerCase().includes(busca) || String(e.idReloj) === busca)
+    .filter(e => !soloRevisar || e.revisar > 0)
+    .sort((a, b) => (b.revisar - a.revisar) || (conAlgo(b) - conAlgo(a)) || a.nombre.localeCompare(b.nombre));
+  const tot = k => F.empleados.reduce((a, e) => a + (e[k] || 0), 0);
+  const nFormatos = new Set(F.empleados.flatMap(e => [...e.he, ...e.permisos, ...e.vacaciones].map(x => x.folio))).size;
+  const pendientesApp = F.empleados.reduce((a, e) => a + e.he.filter(t => !t.firme).length, 0);
+
+  contenido.innerHTML = '';
+  const cont = document.createElement('div');
+  const tarjetaSel = document.createElement('div');
+  tarjetaSel.className = 'tarjeta';
+  tarjetaSel.appendChild(selectorPago(() => navegar('formatos')));
+  cont.appendChild(tarjetaSel);
+
+  cont.insertAdjacentHTML('beforeend', `
+    ${!F.dinmecOk ? `<div class="aviso aviso-error">No se pudieron traer los formatos de dinmec-app: ${esc(F.dinmecError || '')}</div>` : ''}
+    <div class="aviso aviso-info">🧾 Formatos de <b>dinmec-app</b> (horas extra FO-RHS-07, permisos FO-RHS-08 y vacaciones) de quienes cobran el
+      <b>${fechaBonita(F.fechaPago)}</b>, comparados día por día con el reloj. Tolerancia: ${Math.round(F.tolerancia * 60)} min.
+      <b>Autorizar formato</b> paga las horas del formato ese día aunque el reloj no las muestre; <b>Emparejar</b> deja constancia de que se revisó y se paga lo del reloj.</div>
+    <div class="kpis">
+      <div class="kpi"><div class="valor">${nFormatos}</div><div class="nombre">Formatos en el periodo</div></div>
+      <div class="kpi"><div class="valor">${tot('heFormato').toFixed(1)} h</div><div class="nombre">H.E. en formatos</div></div>
+      <div class="kpi"><div class="valor">${tot('heReloj').toFixed(1)} h</div><div class="nombre">H.E. según reloj</div></div>
+      <div class="kpi"><div class="valor">${tot('hePagadas').toFixed(1)} h</div><div class="nombre">H.E. a pagar</div></div>
+      <div class="kpi"><div class="valor" style="color:${tot('revisar') ? '#d29922' : ''}">${tot('revisar')}</div><div class="nombre">Días por revisar</div></div>
+      <div class="kpi"><div class="valor">${pendientesApp}</div><div class="nombre">Tareas sin autorizar en la app</div></div>
+    </div>
+    ${F.sinEnlazar.length ? `<div class="aviso aviso-ambar">⚠️ Formatos de personas que no se encontraron en nómina (revisa su número de empleado):
+      ${F.sinEnlazar.map(x => `<b>${esc(x.nombre || '¿?')}</b>${x.numEmpleado != null ? ' #' + esc(x.numEmpleado) : ''} (${esc(x.folios.join(', '))})`).join(' · ')}</div>` : ''}
+    <div class="tarjeta">
+      <div class="fila-controles">
+        <div class="campo"><label>Buscar trabajador</label><input id="form-busca" value="${esc(busca)}" placeholder="Nombre o ID"></div>
+        <label style="align-self:center"><input type="checkbox" id="form-solo" ${soloRevisar ? 'checked' : ''}> Solo con días por revisar</label>
+        <span style="flex:1"></span>
+        <button class="btn btn-azul" id="form-imprimir-todos">🖨️ Imprimir los que tienen formatos</button>
+      </div>
+      <div class="tabla-scroll"><table>
+        <thead><tr><th>ID</th><th>Trabajador</th><th>Periodo</th><th>H.E. formato</th><th>H.E. reloj</th><th>H.E. a pagar</th>
+          <th>Permisos</th><th>Vacaciones</th><th>Por revisar</th><th></th></tr></thead>
+        <tbody id="form-cuerpo">${lista.map(filaTrabajadorFormatos).join('') || '<tr><td colspan="10">Sin trabajadores con ese filtro.</td></tr>'}</tbody>
+      </table></div>
+    </div>`);
+  contenido.appendChild(cont);
+
+  const rehacer = () => pintarFormatos();
+  $('#form-busca').addEventListener('change', e => { localStorage.setItem('form_busca', e.target.value.trim()); rehacer(); });
+  $('#form-solo').addEventListener('change', e => { localStorage.setItem('form_solo', e.target.checked ? '1' : '0'); rehacer(); });
+  $('#form-imprimir-todos').addEventListener('click', () => imprimirResumenes(F.empleados.filter(conAlgo), 'todo'));
+  $('#form-cuerpo').addEventListener('click', manejarClickFormatos);
+}
+
+function filaTrabajadorFormatos(e) {
+  const abierto = FORM_ABIERTOS.has(String(e.idReloj));
+  const dif = +(e.heFormato - e.heReloj).toFixed(2);
+  let html = `<tr class="fila-click" data-abrir="${e.idReloj}" style="cursor:pointer">
+    <td>${e.idReloj}</td>
+    <td><b>${esc(e.nombre)}</b><div class="texto-chico">${esc(NOMBRE_GRUPO[e.grupo] || e.grupo)}</div></td>
+    <td class="texto-chico">${fechaBonita(e.periodoInicio)} – ${fechaBonita(e.periodoFin)}</td>
+    <td>${e.heFormato ? horasYMin(e.heFormato) : '—'}</td>
+    <td>${e.heReloj ? horasYMin(e.heReloj) : '—'}${e.he.length && Math.abs(dif) > FORMATOS.tolerancia ? ` <span class="etiqueta ${dif > 0 ? 'et-rojo' : 'et-ambar'}">${dif > 0 ? '+' : '−'}${horasYMin(Math.abs(dif))}</span>` : ''}</td>
+    <td><b>${e.hePagadas ? horasYMin(e.hePagadas) : '—'}</b></td>
+    <td>${e.permisos.length || '—'}</td>
+    <td>${e.vacaciones.length ? e.filas.filter(x => x.vacaciones).length + ' día(s)' : '—'}</td>
+    <td>${e.revisar ? `<span class="etiqueta et-ambar">${e.revisar}</span>` : (e.he.length ? '<span class="etiqueta et-verde">OK</span>' : '—')}</td>
+    <td style="white-space:nowrap"><button class="btn btn-mini" data-imprimir="${e.idReloj}">🖨️ Resumen</button> ${abierto ? '▲' : '▼'}</td>
+  </tr>`;
+  if (abierto) html += `<tr><td colspan="10" style="background:rgba(255,255,255,.02)">${detalleTrabajadorFormatos(e)}</td></tr>`;
+  return html;
+}
+
+function detalleTrabajadorFormatos(e) {
+  const filas = e.filas.filter(x => x.estado !== 'sin_extra' || x.permisos.length || x.vacaciones || x.falta || x.decision);
+  const accion = x => {
+    const hayF = x.horasFormato > 0 || x.folios.length;
+    const dec = x.decision;
+    if (dec) {
+      return `<span class="etiqueta ${dec.usar === 'formato' ? 'et-azul' : 'et-verde'}">${dec.usar === 'formato' ? `Autorizado formato: ${horasYMin(dec.horas)}` : 'Emparejado (reloj)'}</span>
+        <button class="btn btn-mini" data-quitar="${e.idReloj}|${x.fecha}" title="Quitar decisión">↺</button>`;
+    }
+    if (!hayF) return '';
+    return `<button class="btn btn-mini btn-primario" data-autorizar="${e.idReloj}|${x.fecha}" title="Pagar las horas del formato ese día">✔ Autorizar formato</button>
+      <button class="btn btn-mini" data-emparejar="${e.idReloj}|${x.fecha}" title="Revisado: se paga lo que marca el reloj">🔗 Emparejar</button>`;
+  };
+  const tareas = e.he.map(t => `<tr>
+      <td>${fechaBonita(t.fecha)}</td><td>${esc(t.folio)}</td>
+      <td>${esc(t.horaInicio || '—')} → ${esc(t.horaFin || 'pendiente')}${t.comidaMin ? ` <span class="texto-chico">(−${t.comidaMin} min comida)</span>` : ''}</td>
+      <td><b>${t.horas != null ? horasYMin(t.horas) : '—'}</b></td>
+      <td>${esc(t.descripcion)}</td>
+      <td>${t.firme ? `<span class="etiqueta et-verde">${esc(t.estatusTxt)}</span>` : `<span class="etiqueta et-ambar">${esc(t.estatusTxt)}</span>`}</td></tr>`).join('');
+  const permisos = e.permisos.map(b => `<tr><td>${fechaBonita(b.fecha)}</td><td>${esc(b.folio)}</td>
+      <td>${esc(b.horaSalida || '—')} → ${esc(b.horaRegreso || '—')}${b.fechaRegreso && b.fechaRegreso !== b.fecha ? ' (' + fechaBonita(b.fechaRegreso) + ')' : ''}</td>
+      <td>${b.horas != null ? horasYMin(b.horas) : '—'}</td><td>${b.pagaHoras ? 'Se pagan' : 'Las repone'}${b.reposicion.length ? ': ' + b.reposicion.map(r => `${fechaBonita(r.del)} ${r.entrada || ''}–${r.salida || ''}`).join(', ') : ''}</td>
+      <td><span class="etiqueta ${b.firme ? 'et-verde' : 'et-ambar'}">${esc(b.estatusTxt)}</span></td></tr>`).join('');
+  const vacs = e.vacaciones.map(v => `<span class="etiqueta ${v.firme ? 'et-verde' : 'et-ambar'}">${esc(v.folio)} · ${fechaBonita(v.inicio)} a ${fechaBonita(v.fin)} · ${v.dias} día(s) · ${esc(v.estatusTxt)}</span>`).join(' ');
+
+  return `
+    <div style="padding:6px 2px">
+      <h3 style="margin:4px 0 8px">Día por día: formato contra reloj</h3>
+      ${filas.length ? `<div class="tabla-scroll"><table>
+        <thead><tr><th>Fecha</th><th>Turno</th><th>Checadas</th><th>H.E. reloj</th><th>H.E. formato</th><th>Resultado</th><th>Se paga</th><th>Permiso / vacación</th><th>Acción</th></tr></thead>
+        <tbody>${filas.map(x => `<tr>
+          <td><b>${x.dia}</b> ${fechaBonita(x.fecha)}</td>
+          <td class="texto-chico">${esc(x.turno || '')}${x.laboral ? '' : ' (descanso)'}</td>
+          <td>${x.numChecadas ? `${esc(x.entrada || '—')} → ${esc(x.salida || '—')}` : (x.falta ? '<span class="etiqueta et-rojo">Falta</span>' : '—')}
+            ${x.esRetardo ? `<span class="etiqueta et-ambar">Retardo +${x.retardoMin}m</span>` : ''}</td>
+          <td>${x.horasExtrasReloj ? horasYMin(x.horasExtrasReloj) : '—'}</td>
+          <td>${x.horasFormato || x.folios.length ? horasYMin(x.horasFormato) + `<div class="texto-chico">${esc(x.folios.join(', '))}${x.formatosPendientes ? ' · sin autorizar en app' : ''}</div>` : '—'}</td>
+          <td>${ESTADO_CONC[x.estado].t ? `<span class="etiqueta ${ESTADO_CONC[x.estado].c}">${ESTADO_CONC[x.estado].t}</span>` : ''}</td>
+          <td><b>${x.horasExtrasPagadas ? horasYMin(x.horasExtrasPagadas) : '—'}</b></td>
+          <td class="texto-chico">${x.vacaciones ? '🏖 Vacaciones' : ''}${x.permisos.map(b => `🚪 Permiso ${esc(b.horaSalida || '')}–${esc(b.horaRegreso || '')}`).join('<br>')}${x.excepcion && !x.vacaciones ? esc(x.excepcion) : ''}</td>
+          <td style="white-space:nowrap">${accion(x)}</td></tr>`).join('')}</tbody>
+      </table></div>` : '<p class="texto-chico">Sin horas extra, formatos ni permisos en el periodo.</p>'}
+      ${tareas ? `<h3 style="margin:14px 0 8px">Formatos de horas extra (FO-RHS-07)</h3><div class="tabla-scroll"><table>
+        <thead><tr><th>Fecha</th><th>Folio</th><th>Horario</th><th>Horas</th><th>Descripción</th><th>Estatus en app</th></tr></thead><tbody>${tareas}</tbody></table></div>` : ''}
+      ${permisos ? `<h3 style="margin:14px 0 8px">Permisos de salida (FO-RHS-08)</h3><div class="tabla-scroll"><table>
+        <thead><tr><th>Fecha</th><th>Folio</th><th>Salida → regreso</th><th>Horas</th><th>Pago</th><th>Estatus en app</th></tr></thead><tbody>${permisos}</tbody></table></div>` : ''}
+      ${vacs ? `<h3 style="margin:14px 0 8px">Vacaciones</h3><p>${vacs}</p>` : ''}
+    </div>`;
+}
+
+async function manejarClickFormatos(ev) {
+  const b = ev.target.closest('button');
+  const empDe = id => FORMATOS.empleados.find(x => String(x.idReloj) === String(id));
+  if (b) {
+    ev.stopPropagation();
+    if (b.dataset.imprimir) return imprimirResumenes([empDe(b.dataset.imprimir)], null);
+    const par = b.dataset.autorizar || b.dataset.emparejar || b.dataset.quitar;
+    if (!par) return;
+    const [id, fecha] = par.split('|');
+    const e = empDe(id);
+    const x = e.filas.find(z => z.fecha === fecha);
+    let cuerpo;
+    if (b.dataset.autorizar) {
+      const txt = prompt(`Horas extra a pagar a ${e.nombre} el ${fechaBonita(fecha)} según formato ${x.folios.join(', ')}.\nReloj: ${x.horasExtrasReloj} h · Formato: ${x.horasFormato} h`, String(x.horasFormato));
+      if (txt == null) return;
+      const horas = Number(String(txt).replace(',', '.'));
+      if (isNaN(horas) || horas < 0 || horas > 24) return alert('Horas inválidas');
+      const nota = prompt('Nota / motivo (opcional), p. ej. "trabajó en sitio del cliente, no checó":', '') || '';
+      cuerpo = { idReloj: e.idReloj, fecha, usar: 'formato', horas, folios: x.folios.join(', '), nota };
+    } else if (b.dataset.emparejar) {
+      cuerpo = { idReloj: e.idReloj, fecha, usar: 'reloj', folios: x.folios.join(', '), nota: '' };
+    } else {
+      if (!confirm('¿Quitar la decisión de este día? Vuelve a pagarse lo que marca el reloj.')) return;
+      cuerpo = { idReloj: e.idReloj, fecha, usar: null };
+    }
+    b.disabled = true;
+    try {
+      await api('/api/conciliacion', { method: 'PUT', body: cuerpo });
+      FORM_ABIERTOS.add(String(e.idReloj));
+      await VISTAS.formatos();
+    } catch (err) { alert(err.message); b.disabled = false; }
+    return;
+  }
+  const tr = ev.target.closest('tr[data-abrir]');
+  if (tr) {
+    const k = tr.dataset.abrir;
+    FORM_ABIERTOS.has(k) ? FORM_ABIERTOS.delete(k) : FORM_ABIERTOS.add(k);
+    pintarFormatos();
+  }
+}
+
+// Resumen imprimible de la semana o quincena del trabajador (para aclarar dudas con él)
+function imprimirResumenes(emps, semana) {
+  emps = emps.filter(Boolean);
+  if (!emps.length) return alert('No hay trabajadores para imprimir.');
+  if (semana === null && emps.length === 1 && emps[0].numSemanas > 1) {
+    const r = prompt('¿Qué quieres imprimir?\n0 = Quincena completa\n1 = Semana 1\n2 = Semana 2', '0');
+    if (r == null) return;
+    semana = ['1', '2'].includes(r.trim()) ? Number(r.trim()) : 'todo';
+  }
+  const zona = $('#zona-impresion');
+  zona.innerHTML = emps.map(e => {
+    let ini = e.periodoInicio, fin = e.periodoFin;
+    if (semana === 1) fin = sumarDias(ini, 6);
+    if (semana === 2) ini = sumarDias(ini, 7);
+    const enR = f => f >= ini && f <= fin;
+    const filas = e.filas.filter(x => enR(x.fecha));
+    const he = e.he.filter(t => enR(t.fecha));
+    const permisos = e.permisos.filter(b => enR(b.fecha));
+    const sum = k => filas.reduce((a, x) => a + (x[k] || 0), 0);
+    return `<div class="recibo resumen-semana">
+      <div class="recibo-cab"><img src="logo.png" alt="">
+        <div><h2>${esc(FORMATOS.empresa)} — Resumen de asistencia y horas extra</h2>
+          <div>${esc(e.nombre)} · N° ${e.idReloj} · ${esc(NOMBRE_GRUPO[e.grupo] || e.grupo)} · Periodo ${fechaBonita(ini)} al ${fechaBonita(fin)} · Pago del ${fechaBonita(FORMATOS.fechaPago)}</div></div></div>
+      <table>
+        <tr><th>Día</th><th>Turno</th><th>Entrada</th><th>Salida</th><th>Hrs trab.</th><th>H.E. reloj</th><th>H.E. formato</th><th>H.E. pagadas</th><th>Observaciones</th></tr>
+        ${filas.map(x => `<tr><td>${x.dia} ${fechaBonita(x.fecha)}</td><td>${esc(x.turno || '')}${x.laboral ? '' : ' (desc.)'}</td>
+          <td>${esc(x.entrada || '—')}</td><td>${esc(x.salida || '—')}</td><td class="num">${x.horasTrabajadas ? x.horasTrabajadas.toFixed(2) : '—'}</td>
+          <td class="num">${x.horasExtrasReloj ? horasYMin(x.horasExtrasReloj) : '—'}</td>
+          <td class="num">${x.horasFormato ? horasYMin(x.horasFormato) : '—'}${x.folios.length ? '<br><small>' + esc(x.folios.join(', ')) + '</small>' : ''}</td>
+          <td class="num"><b>${x.horasExtrasPagadas ? horasYMin(x.horasExtrasPagadas) : '—'}</b></td>
+          <td><small>${[x.falta ? 'Falta' : '', x.esRetardo ? `Retardo +${x.retardoMin} min` : '', x.vacaciones ? 'Vacaciones' : '',
+            ...x.permisos.map(b => `Permiso ${b.horaSalida || ''}–${b.horaRegreso || ''} (${b.pagaHoras ? 'se paga' : 'repone'})`),
+            ESTADO_CONC[x.estado].t && x.estado !== 'coincide' ? ESTADO_CONC[x.estado].t : '',
+            x.decision ? (x.decision.usar === 'formato' ? `Autorizado por formato${x.decision.nota ? ': ' + x.decision.nota : ''}` : 'Revisado contra reloj') : ''].filter(Boolean).map(esc).join(' · ')}</small></td></tr>`).join('')}
+        <tr><td colspan="4"><b>Totales</b></td><td class="num"><b>${sum('horasTrabajadas').toFixed(2)}</b></td><td class="num"><b>${horasYMin(sum('horasExtrasReloj'))}</b></td>
+          <td class="num"><b>${horasYMin(sum('horasFormato'))}</b></td><td class="num"><b>${horasYMin(sum('horasExtrasPagadas'))}</b></td>
+          <td><small>${filas.filter(x => x.falta).length} falta(s) · ${filas.filter(x => x.esRetardo).length} retardo(s)</small></td></tr>
+      </table>
+      ${he.length ? `<p style="margin:10px 0 4px"><b>Horas extra reportadas (FO-RHS-07)</b></p><table>
+        <tr><th>Fecha</th><th>Folio</th><th>Horario</th><th>Horas</th><th>Actividad</th><th>Estatus</th></tr>
+        ${he.map(t => `<tr><td>${fechaBonita(t.fecha)}</td><td>${esc(t.folio)}</td><td>${esc(t.horaInicio || '')}–${esc(t.horaFin || '')}</td>
+          <td class="num">${t.horas != null ? horasYMin(t.horas) : '—'}</td><td>${esc(t.descripcion)}</td><td>${esc(t.estatusTxt)}</td></tr>`).join('')}</table>` : ''}
+      ${permisos.length ? `<p style="margin:10px 0 4px"><b>Permisos de salida (FO-RHS-08)</b></p><table>
+        <tr><th>Fecha</th><th>Folio</th><th>Salida → regreso</th><th>Horas</th><th>Pago</th></tr>
+        ${permisos.map(b => `<tr><td>${fechaBonita(b.fecha)}</td><td>${esc(b.folio)}</td><td>${esc(b.horaSalida || '')} → ${esc(b.horaRegreso || '')}</td>
+          <td class="num">${b.horas != null ? horasYMin(b.horas) : '—'}</td><td>${b.pagaHoras ? 'Se pagan' : 'Las repone'}</td></tr>`).join('')}</table>` : ''}
+      <p style="font-size:10.5px;margin-top:8px">H.E. reloj = tiempo extra calculado con las checadas y el turno asignado. H.E. pagadas = lo que entra en la nómina (incluye lo autorizado por formato).
+        Cualquier aclaración debe hacerse antes del cierre de nómina.</p>
+      <div class="firmas"><div>Trabajador · enterado</div><div>Recursos Humanos</div></div>
+    </div>`;
+  }).join('');
+  window.print();
+}
+
 // ============================================================
 // VISTA: DETALLE DIARIO
 // ============================================================

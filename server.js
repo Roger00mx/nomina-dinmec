@@ -117,6 +117,7 @@ function datosBase() {
     prestamos: store.leer('prestamos', []),
     banco: store.leer('banco', {}),
     decisiones: store.leer('decisiones', {}),
+    conciliacion: store.leer('conciliacion', {}),
     parametros: store.leer('parametros', {}),
   };
 }
@@ -235,6 +236,76 @@ async function calcularPago(fecha) {
     dias: [...resSemanal.dias, ...resQuincenal.dias],
     noCobranHoy: empleados.filter(e => grupoDe(e) !== 'SEMANAL' && grupoDe(e) !== grupoQuincenal)
       .map(e => ({ idReloj: e.idReloj, nombre: e.nombre, grupo: grupoDe(e) })),
+  };
+}
+
+
+// ---------- formatos de dinmec-app contra el reloj (por trabajador) ----------
+// Para cada trabajador que cobra en esa fecha de pago: sus formatos de horas extra,
+// permisos y vacaciones del periodo, y día por día si las horas extra del formato
+// cuadran con lo que calculó el reloj. TOLERANCIA en horas para decir "coincide".
+const TOL_CONCILIACION = 0.25;
+
+async function formatosPago(fecha) {
+  const p = await calcularPago(fecha);
+  const desde = motor.sumarDias(p.fechaPago, -15);
+  const hasta = motor.sumarDias(p.fechaPago, 0);
+  const empleados = store.leer('empleados', []);
+  const f = await dinmec.formatosDetalle(desde, hasta, empleados);
+  if (f.error) console.error('Formatos de dinmec-app:', f.error);
+  const conc = store.leer('conciliacion', {});
+
+  const lista = p.resumen.map(r => {
+    const enRango = x => x >= r.periodoInicio && x <= r.periodoFin;
+    const fx = f.porId[String(r.idReloj)] || { he: [], permisos: [], vacaciones: [] };
+    const he = fx.he.filter(t => enRango(t.fecha));
+    const permisos = fx.permisos.filter(b => enRango(b.fecha));
+    const vacaciones = fx.vacaciones.filter(v => v.fin >= r.periodoInicio && v.inicio <= r.periodoFin);
+    const dias = p.dias.filter(d => String(d.idReloj) === String(r.idReloj) && enRango(d.fecha));
+
+    const filas = dias.map(d => {
+      const tareas = he.filter(t => t.fecha === d.fecha);
+      const hayFormato = tareas.length > 0;
+      const horasFormato = +tareas.reduce((a, t) => a + (t.horas || 0), 0).toFixed(2);
+      const reloj = d.horasExtrasReloj != null ? d.horasExtrasReloj : (d.horasExtras || 0);
+      const checo = (d.numChecadas || 0) > 0 || !!d.editadoManual;
+      let estado = 'sin_extra';
+      if (hayFormato && !checo) estado = 'sin_checadas';
+      else if (hayFormato && Math.abs(horasFormato - reloj) <= TOL_CONCILIACION) estado = 'coincide';
+      else if (hayFormato && horasFormato > reloj) estado = 'formato_mas';
+      else if (hayFormato) estado = 'reloj_mas';
+      else if (reloj > 0) estado = 'reloj_sin_formato';
+      const dec = conc[r.idReloj + '_' + d.fecha] || null;
+      return {
+        fecha: d.fecha, dia: d.dia, turno: d.turno, laboral: d.laboral, entrada: d.entrada, salida: d.salida,
+        salComida: d.salComida, regComida: d.regComida, numChecadas: d.numChecadas || 0, falta: !!d.falta,
+        esRetardo: !!d.esRetardo, retardoMin: d.retardoMin || 0, excepcion: d.excepcion || '',
+        horasTrabajadas: d.horasTrabajadas || 0, horasEsperadas: d.horasEsperadas || 0,
+        horasExtrasReloj: +Number(reloj).toFixed(2), horasExtrasPagadas: d.horasExtras || 0,
+        horasFormato, folios: [...new Set(tareas.map(t => t.folio).filter(Boolean))],
+        formatosPendientes: tareas.filter(t => !t.firme).length,
+        estado, decision: dec, alertas: d.alertas || [],
+        permisos: permisos.filter(b => b.fecha === d.fecha),
+        vacaciones: vacaciones.some(v => d.fecha >= v.inicio && d.fecha <= v.fin),
+      };
+    });
+    const revisar = filas.filter(x => ['sin_checadas', 'formato_mas', 'reloj_mas', 'reloj_sin_formato'].includes(x.estado) && !x.decision).length;
+    return {
+      idReloj: r.idReloj, nombre: r.nombre, grupo: r.grupo, puesto: r.puesto || '',
+      periodoInicio: r.periodoInicio, periodoFin: r.periodoFin, numSemanas: r.semanas.length,
+      retardos: r.retardos, faltas: r.faltas, horasTrabajadas: r.horasTrabajadas,
+      heReloj: +filas.reduce((a, x) => a + x.horasExtrasReloj, 0).toFixed(2),
+      heFormato: +he.reduce((a, t) => a + (t.horas || 0), 0).toFixed(2),
+      hePagadas: r.horasExtras, revisar,
+      he, permisos, vacaciones, filas,
+    };
+  });
+
+  return {
+    fechaPago: p.fechaPago, grupoQuincenal: p.grupoQuincenal, semanal: p.semanal, quincenal: p.quincenal,
+    dinmecOk: !!f.ok, dinmecError: f.error || null, sinEnlazar: f.sinEnlazar || [],
+    tolerancia: TOL_CONCILIACION, empresa: store.leer('parametros', {}).empresa || '',
+    empleados: lista,
   };
 }
 
@@ -611,12 +682,12 @@ const servidor = http.createServer(async (req, res) => {
 
       // Respaldo completo de todos los datos (para migrar a la nube o guardar copia)
       const COLECCIONES_RESPALDO = ['parametros', 'empleados', 'turnos', 'checadas', 'excepciones',
-        'asignaciones', 'viajes', 'capturas', 'prestamos', 'banco', 'decisiones', 'periodos'];
+        'asignaciones', 'viajes', 'capturas', 'prestamos', 'banco', 'decisiones', 'conciliacion', 'periodos'];
 
       if (ruta === '/api/respaldo' && req.method === 'GET') {
         const datos = { app: 'nomina-dinmec', creado: new Date().toISOString() };
         for (const c of COLECCIONES_RESPALDO) {
-          const porDefecto = ['parametros', 'banco', 'decisiones'].includes(c) ? {} : [];
+          const porDefecto = ['parametros', 'banco', 'decisiones', 'conciliacion'].includes(c) ? {} : [];
           datos[c] = store.leer(c, porDefecto);
         }
         return json(res, 200, datos);
@@ -641,6 +712,32 @@ const servidor = http.createServer(async (req, res) => {
         } catch (e) {
           return json(res, 200, { url: null });
         }
+      }
+
+
+      // ---- formatos de dinmec-app contra el reloj ----
+      if (ruta === '/api/formatos' && req.method === 'GET') {
+        const fecha = url.searchParams.get('fecha');
+        if (!fecha) return json(res, 400, { error: 'Falta la fecha de pago' });
+        return json(res, 200, await formatosPago(fecha));
+      }
+
+      // Decisión por trabajador y día: usar 'formato' (pagar lo del formato aunque el reloj
+      // no lo muestre) o 'reloj' (emparejado / revisado). usar null borra la decisión.
+      if (ruta === '/api/conciliacion' && req.method === 'PUT') {
+        const { idReloj, fecha, usar, horas, folios, nota } = await leerCuerpo(req);
+        if (idReloj == null || !fecha) return json(res, 400, { error: 'Faltan trabajador y fecha' });
+        const conc = store.leer('conciliacion', {});
+        const clave = idReloj + '_' + fecha;
+        if (!usar) delete conc[clave];
+        else {
+          if (!['formato', 'reloj'].includes(usar)) return json(res, 400, { error: 'Decisión inválida' });
+          if (usar === 'formato' && (horas == null || isNaN(Number(horas)) || Number(horas) < 0 || Number(horas) > 24))
+            return json(res, 400, { error: 'Horas inválidas' });
+          conc[clave] = { usar, horas: usar === 'formato' ? +Number(horas).toFixed(2) : null, folios: folios || '', nota: nota || '', el: new Date().toISOString() };
+        }
+        store.guardar('conciliacion', conc);
+        return json(res, 200, { ok: true });
       }
 
       if (ruta === '/api/decisiones' && req.method === 'PUT') {

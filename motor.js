@@ -332,6 +332,11 @@ function calcularPeriodo(opciones) {
     if (c.fecha) capturaPorDia[c.idReloj + '_' + c.fecha] = c;
   }
 
+  // Conciliación de formatos de dinmec-app contra el reloj: "id_fecha" -> decisión.
+  // usar 'formato' = se pagan las horas extra del formato FO-RHS-07 aunque el reloj
+  // no las muestre; usar 'reloj' = revisado / emparejado, se paga lo que marca el reloj.
+  const conciliacion = opciones.conciliacion || {};
+
   // Agrupar checadas por empleado y fecha (en minutos desde medianoche).
   // Para turnos nocturnos, las checadas de madrugada pertenecen al día anterior.
   const porEmpleado = {};
@@ -473,6 +478,20 @@ function calcularPeriodo(opciones) {
             + (captura.foto ? ' · 📷 con foto' : '')
             + (captura.nota ? ' — ' + captura.nota : '')];
           dia.editadoManual = true;
+        }
+
+        // Conciliación con los formatos de horas extra (última palabra sobre las horas extra del día)
+        dia.horasExtrasReloj = dia.horasExtras;
+        const conc = conciliacion[empleado.idReloj + '_' + fecha];
+        if (conc && conc.usar === 'formato' && conc.horas != null && !isNaN(Number(conc.horas))) {
+          const h = +Number(conc.horas).toFixed(2);
+          dia.horasTrabajadas = +Math.max(0, dia.horasTrabajadas - dia.horasExtras + h).toFixed(2);
+          dia.horasExtras = h;
+          dia.conciliado = 'formato';
+          dia.alertas.push('📝 H.E. autorizadas por formato' + (conc.folios ? ' ' + conc.folios : '')
+            + ' (reloj ' + dia.horasExtrasReloj + ' h → se pagan ' + h + ' h)' + (conc.nota ? ' — ' + conc.nota : ''));
+        } else if (conc && conc.usar === 'reloj') {
+          dia.conciliado = 'reloj';
         }
 
         dias.push(dia);

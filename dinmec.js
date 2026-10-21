@@ -225,4 +225,135 @@ async function horasExtraPorEmpleado(desde, hasta, empleados) {
   return { ok: true, desde, hasta, porId, sinEnlazar };
 }
 
-module.exports = { traer, traerVacaciones, cruzar, vacacionesComoExcepciones, horasExtraPorEmpleado };
+
+// ---------- formatos de RH (FO-RHS-07 / 08 / 09) con su detalle ----------
+// Lectura directa de las tablas de Solicitudes RH de dinmec-app (solo lectura).
+async function leerTabla(ruta) {
+  const base = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+  const llave = process.env.SUPABASE_ANON_KEY || '';
+  if (!base || !llave) return { error: 'Faltan las variables SUPABASE_URL y SUPABASE_ANON_KEY en Render.' };
+  let r;
+  try {
+    r = await fetch(base + '/rest/v1/' + ruta, { headers: { apikey: llave, Authorization: 'Bearer ' + llave } });
+  } catch (e) { return { error: 'No se pudo contactar a Supabase: ' + e.message }; }
+  const texto = await r.text();
+  if (!r.ok) return { error: ruta.split('?')[0] + ' respondio ' + r.status + ': ' + texto.slice(0, 300) };
+  try { return { filas: JSON.parse(texto) }; } catch (e) { return { error: ruta.split('?')[0] + ' no devolvio JSON' }; }
+}
+
+// Trae una tabla filtrando por una lista de ids (en bloques para no hacer la URL enorme)
+async function leerPorIds(tabla, campo, ids, select = '*') {
+  const lista = [...new Set(ids.filter(Boolean))];
+  const filas = [];
+  for (let i = 0; i < lista.length; i += 80) {
+    const bloque = lista.slice(i, i + 80).join(',');
+    const r = await leerTabla(`${tabla}?select=${select}&${campo}=in.(${bloque})&limit=5000`);
+    if (r.error) return r;
+    filas.push(...r.filas);
+  }
+  return { filas };
+}
+
+const aMinutos = h => {
+  if (!h) return null;
+  const [a, b] = String(h).split(':').map(Number);
+  return isNaN(a) || isNaN(b) ? null : a * 60 + b;
+};
+const hhmm = h => (h ? String(h).slice(0, 5) : null);
+
+// Horas netas de una tarea: las capturadas al cierre o fin - inicio - comida.
+function horasTarea(t) {
+  if (t.total_horas != null && t.total_horas !== '') return +Number(t.total_horas).toFixed(2);
+  const i = aMinutos(t.hora_inicio), f = aMinutos(t.hora_fin);
+  if (i == null || f == null) return null;
+  let min = f - i; if (min < 0) min += 1440;
+  if (t.comida_aplica) min -= Number(t.comida_minutos) || 0;
+  return +Math.max(0, min / 60).toFixed(2);
+}
+
+const ESTATUS_TXT = {
+  pendiente_trabajador: 'Espera acuse del trabajador', pendiente_lider: 'Espera VoBo líder',
+  pendiente_direccion: 'Espera Dirección', autorizada: 'Autorizada', enviada_finanzas: 'Enviada a Finanzas',
+};
+
+// Devuelve { ok, error, porId: { idReloj: { he:[], permisos:[], vacaciones:[] } }, sinEnlazar: [] }
+async function formatosDetalle(desde, hasta, empleados) {
+  const vacio = { ok: false, desde, hasta, porId: {}, sinEnlazar: [] };
+  const SEL = 'id,folio,tipo,estatus,num_empleado,solicitante_id,origen,he_motivo,he_tipo_pago,he_total_horas,he_lugar,he_lugar_detalle,'
+    + 'ps_paga_horas,ps_total_horas_pagar,vac_inicio,vac_fin,vac_dias_requeridos,comentarios_trabajador,fecha_solicitud,lider_nombre,direccion_nombre';
+
+  const [tareas, bloques, vacs] = await Promise.all([
+    leerTabla(`rh_he_tareas?select=*&fecha=gte.${desde}&fecha=lte.${hasta}&order=fecha,orden&limit=5000`),
+    leerTabla(`rh_ps_bloques?select=*&fecha_salida=gte.${desde}&fecha_salida=lte.${hasta}&order=fecha_salida,orden&limit=5000`),
+    leerTabla(`rh_solicitudes?select=${SEL}&tipo=eq.vacaciones&vac_inicio=lte.${hasta}&vac_fin=gte.${desde}&limit=2000`),
+  ]);
+  const err = [tareas, bloques, vacs].find(x => x.error);
+  if (err) return { ...vacio, error: err.error };
+
+  const idsSol = [...tareas.filas.map(t => t.solicitud_id), ...bloques.filas.map(b => b.solicitud_id)];
+  const sols = await leerPorIds('rh_solicitudes', 'id', idsSol, SEL);
+  if (sols.error) return { ...vacio, error: sols.error };
+  const todas = [...sols.filas, ...vacs.filas].filter(x => x.estatus !== 'rechazada');
+  const porSol = new Map(todas.map(x => [x.id, x]));
+
+  const repos = await leerPorIds('rh_ps_reposicion', 'solicitud_id', bloques.filas.map(b => b.solicitud_id));
+  const ops = await leerPorIds('operators', 'id', todas.map(x => x.solicitante_id), 'id,nombre,numero');
+  const vemp = await leerPorIds('vac_empleados', 'operator_id', todas.map(x => x.solicitante_id), 'operator_id,num_trabajador,nombre');
+  const opPorId = new Map((ops.filas || []).map(o => [o.id, o]));
+  const vePorOp = new Map((vemp.filas || []).map(v => [v.operator_id, v]));
+
+  const idx = indice(empleados);
+  const porId = {};
+  const sinEnlazarMap = new Map();
+  const destino = sol => {
+    const op = opPorId.get(sol.solicitante_id) || {};
+    const ve = vePorOp.get(sol.solicitante_id) || {};
+    const nombre = op.nombre || ve.nombre || '';
+    const hit = buscar(idx, sol.num_empleado ?? ve.num_trabajador ?? op.numero, nombre)
+      || buscar(idx, op.numero, nombre) || buscar(idx, ve.num_trabajador, nombre);
+    if (!hit) {
+      const k = claveNombre(nombre) || String(sol.num_empleado || '?');
+      const prev = sinEnlazarMap.get(k) || { nombre, numEmpleado: sol.num_empleado ?? ve.num_trabajador ?? op.numero ?? null, folios: [] };
+      if (sol.folio && !prev.folios.includes(sol.folio)) prev.folios.push(sol.folio);
+      sinEnlazarMap.set(k, prev);
+      return null;
+    }
+    const k = String(hit.empleado.idReloj);
+    return (porId[k] = porId[k] || { he: [], permisos: [], vacaciones: [] });
+  };
+  const cab = sol => ({
+    solicitudId: sol.id, folio: sol.folio || '', estatus: sol.estatus, estatusTxt: ESTATUS_TXT[sol.estatus] || sol.estatus,
+    firme: sol.estatus === 'autorizada' || sol.estatus === 'enviada_finanzas', asignada: sol.origen === 'asignacion',
+  });
+
+  for (const t of tareas.filas) {
+    const sol = porSol.get(t.solicitud_id); if (!sol) continue;
+    const d = destino(sol); if (!d) continue;
+    d.he.push({
+      ...cab(sol), fecha: t.fecha, horaInicio: hhmm(t.hora_inicio), horaFin: hhmm(t.hora_fin),
+      comidaMin: t.comida_aplica ? Number(t.comida_minutos) || 0 : 0, horas: horasTarea(t),
+      descripcion: t.descripcion || '', concluido: t.concluido, avance: t.avance_pct,
+      motivo: sol.he_motivo || '', tipoPago: sol.he_tipo_pago || '',
+    });
+  }
+  const repPorSol = {};
+  for (const r of (repos.filas || [])) (repPorSol[r.solicitud_id] = repPorSol[r.solicitud_id] || []).push(r);
+  for (const b of bloques.filas) {
+    const sol = porSol.get(b.solicitud_id); if (!sol) continue;
+    const d = destino(sol); if (!d) continue;
+    d.permisos.push({
+      ...cab(sol), fecha: b.fecha_salida, horaSalida: hhmm(b.hora_salida), fechaRegreso: b.fecha_regreso, horaRegreso: hhmm(b.hora_regreso),
+      horas: b.total_horas != null ? +Number(b.total_horas).toFixed(2) : null, pagaHoras: !!sol.ps_paga_horas,
+      reposicion: (repPorSol[b.solicitud_id] || []).map(r => ({ del: r.fecha_del, al: r.fecha_al, entrada: hhmm(r.hora_entrada), salida: hhmm(r.hora_salida) })),
+      motivo: sol.comentarios_trabajador || '',
+    });
+  }
+  for (const v of vacs.filas) {
+    if (v.estatus === 'rechazada') continue;
+    const d = destino(v); if (!d) continue;
+    d.vacaciones.push({ ...cab(v), inicio: v.vac_inicio, fin: v.vac_fin, dias: v.vac_dias_requeridos });
+  }
+  return { ok: true, desde, hasta, porId, sinEnlazar: [...sinEnlazarMap.values()] };
+}
+
+module.exports = { traer, traerVacaciones, cruzar, vacacionesComoExcepciones, horasExtraPorEmpleado, formatosDetalle };

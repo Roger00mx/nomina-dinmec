@@ -648,30 +648,50 @@ const servidor = http.createServer(async (req, res) => {
           [{ t: 'titulo', v: `${empresa} — Detalle diario` }],
           [{ t: 'txt', v: `Pago del ${fBonita(p.fechaPago)} (quincenal: ${fBonita(p.quincenal.inicio)} al ${fBonita(p.quincenal.fin)} · semanal: ${fBonita(p.semanal.inicio)} al ${fBonita(p.semanal.fin)})` }],
           [],
-          ['ID', 'Nombre', 'Fecha', 'Día', 'Turno', 'Entrada', 'Desayuno', 'Comida', 'Salida', '# Chec.',
-            'Retardo', 'Hrs trab.', 'Hrs esp.', 'Hrs extra', 'Alertas'].map(v => ({ t: 'enc', v })),
+          ['ID', 'Nombre', 'Fecha', 'Día', 'Turno', 'Entrada', 'Salida', 'Todas las checadas', 'Desayuno', 'Comida',
+            'Retardo', 'Hrs trab.', 'Jornada', 'Debe (h)', 'H.E. reloj', 'H.E. formato', 'Horario formato', 'H.E. autorizada',
+            'Permiso / vacaciones', 'Alertas'].map(v => ({ t: 'enc', v })),
         ];
+        // Formatos de dinmec-app por día (si no responde, esas columnas quedan vacías)
+        const fdia = {};
+        try {
+          const fp = await formatosPago(fecha);
+          for (const e of fp.empleados) for (const x of e.filas) {
+            fdia[e.idReloj + '_' + x.fecha] = { ...x, tareas: e.he.filter(t => t.fecha === x.fecha) };
+          }
+        } catch (e) { console.error('Formatos para Excel:', e.message); }
         for (const d of p.dias) {
-          if (d.numChecadas === 0 && !d.falta && !d.alertas.length) continue;
+          const f = fdia[d.idReloj + '_' + d.fecha] || {};
+          if (d.numChecadas === 0 && !d.falta && !d.alertas.length && !(f.folios || []).length) continue;
+          const marcas = [];
+          if (f.vacaciones || d.excepcion === 'Vacaciones') marcas.push('Vacaciones');
+          for (const b of (f.permisos || [])) marcas.push(`Permiso ${b.horaSalida || ''}-${b.horaRegreso || ''} ${b.folio} (${b.pagaHoras ? 'se pagan' : 'las repone'})`);
+          if (d.excepcion && d.excepcion !== 'Vacaciones') marcas.push(d.excepcion);
+          if (f.decision) marcas.push(f.decision.usar === 'formato' ? 'H.E. autorizadas por formato' + (f.decision.nota ? ': ' + f.decision.nota : '') : 'Emparejado con reloj');
           filas.push([
             { t: 'num', v: d.idReloj }, { t: 'txt', v: d.nombre },
             { t: 'txt', v: fBonita(d.fecha) }, { t: 'txt', v: d.dia },
             { t: 'txt', v: d.turno + (d.laboral ? '' : ' (no laboral)') },
             { t: 'txt', v: d.entrada || '—' },
+            { t: 'txt', v: d.salida || '—' },
+            { t: 'txt', v: (d.checadas || []).join('  ') },
             { t: 'txt', v: d.salDesayuno ? `${d.salDesayuno}→${d.regDesayuno} (${d.minDesayuno}m)` : '' },
             { t: 'txt', v: d.salComida ? `${d.salComida}→${d.regComida} (${d.minComida}m)` : '' },
-            { t: 'txt', v: d.salida || '—' },
-            { t: 'num', v: d.numChecadas },
             { t: 'txt', v: d.esRetardo ? `Sí${d.retardoMin ? ' +' + d.retardoMin + 'm' : ''}` : (d.laboral && d.numChecadas ? 'No' : '') },
             { t: 'num', v: d.horasTrabajadas || 0 },
             { t: 'num', v: d.horasEsperadas || 0 },
+            { t: 'num', v: d.horasDebe || 0 },
+            { t: 'txt', v: horasYMin(d.horasExtrasReloj ?? d.horasExtras) },
+            { t: 'txt', v: f.horasFormato ? horasYMin(f.horasFormato) : '' },
+            { t: 'txt', v: (f.tareas || []).map(t => `${t.horaInicio || '?'}-${t.horaFin || '?'} ${t.folio}`).join(' / ') },
             { t: 'txt', v: horasYMin(d.horasExtras) },
+            { t: 'txt', v: marcas.join(' · ') },
             { t: 'txt', v: (d.falta ? 'FALTA · ' : '') + d.alertas.join(' · ') },
           ]);
         }
         const xlsx = excel.generarXlsx([{
           nombre: 'Detalle diario', filas,
-          anchos: [6, 34, 13, 6, 14, 9, 20, 20, 9, 8, 9, 9, 9, 12, 60],
+          anchos: [6, 34, 13, 6, 14, 9, 9, 40, 20, 20, 9, 9, 9, 9, 11, 11, 30, 12, 40, 60],
         }]);
         res.writeHead(200, {
           'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

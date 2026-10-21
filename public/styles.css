@@ -150,6 +150,9 @@ td input, td select { padding: 4px 6px; border: 1px solid var(--borde); border-r
   .recibo .firmas { display: flex; justify-content: space-around; margin-top: 34px; }
   .recibo .firmas div { border-top: 1px solid #333; padding: 4px 30px 0; text-align: center; }
   .recibo .neto { font-size: 15px; font-weight: 700; }
+  .resumen-semana { page-break-after: always; page-break-inside: auto; font-size: 11px; }
+  .resumen-semana table { font-size: 10.5px; width: 100%; border-collapse: collapse; }
+  .resumen-semana small { font-size: 9.5px; }
 }
 
 @media (max-width: 800px) {

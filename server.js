@@ -240,6 +240,106 @@ async function calcularPago(fecha) {
 }
 
 
+// ---------- dashboard de asistencia (rango de fechas) ----------
+// Recorre cada viernes de pago del rango con la MISMA lógica de la nómina (grupo semanal
+// cada semana y quincenal A/B alternado), junta los días de cada trabajador y saca indicadores.
+const TIPOS_LIBRES = ['Permiso', 'Incapacidad', 'Vacaciones'];
+const CHECADA_INCOMPLETA = [
+  ['No checó entrada', 'Sin entrada'],
+  ['No checó salida', 'Sin salida'],
+  ['Descanso sin checada de regreso', 'Sin regreso de descanso'],
+  ['Solo entrada y salida', 'Sin checadas de descansos'],
+  ['Una sola checada', 'Una sola checada'],
+];
+
+async function dashboardAsistencia(desde, hasta) {
+  const parametros = store.leer('parametros', {});
+  const diaInicio = parametros.diaInicioSemana || 5;
+  const checadas = store.leer('checadas', []);
+  const ultima = checadas.reduce((m, c) => (c.fecha > m ? c.fecha : m), '');
+  if (ultima && hasta > ultima) hasta = ultima; // no contar como falta días sin checadas cargadas
+  if (!desde || !hasta || desde > hasta) return { desde, hasta, ultimaChecada: ultima, empleados: [], semanas: [], meses: [] };
+
+  const { base, vacaciones } = await baseConVacaciones(motor.sumarDias(desde, -14), motor.sumarDias(hasta, 14));
+  const empleados = store.leer('empleados', []).filter(e => e.activo);
+  const grupoDe = e => e.grupoPago || 'A';
+  const ancla = motor.inicioDeSemana(base.parametros.anclaGrupoA || desde, diaInicio);
+
+  const vistos = new Set();
+  const dias = [];
+  let pago = motor.sumarDias(motor.inicioDeSemana(desde, diaInicio), 7);
+  const ultimoPago = motor.sumarDias(motor.inicioDeSemana(hasta, diaInicio), 14);
+  for (let i = 0; i < 80 && pago <= ultimoPago; i++, pago = motor.sumarDias(pago, 7)) {
+    const sem = Math.round((new Date(pago + 'T12:00:00') - new Date(ancla + 'T12:00:00')) / 604800000);
+    const grupoQ = ((sem % 2) + 2) % 2 === 0 ? 'A' : 'B';
+    const corridas = [
+      { emps: empleados.filter(e => grupoDe(e) === 'SEMANAL'), ini: motor.sumarDias(pago, -7), n: 1 },
+      { emps: empleados.filter(e => grupoDe(e) === grupoQ), ini: motor.sumarDias(pago, -14), n: 2 },
+    ];
+    for (const c of corridas) {
+      if (!c.emps.length) continue;
+      const r = motor.calcularPeriodo({ ...base, empleados: c.emps, claveDecisiones: pago, fechaInicio: c.ini, numSemanas: c.n });
+      for (const d of r.dias) {
+        const k = d.idReloj + '_' + d.fecha;
+        if (d.fecha < desde || d.fecha > hasta || vistos.has(k)) continue;
+        vistos.add(k);
+        dias.push(d);
+      }
+    }
+  }
+
+  const porEmp = new Map(empleados.map(e => [String(e.idReloj), {
+    idReloj: e.idReloj, nombre: e.nombre, puesto: e.puesto || '', grupo: grupoDe(e),
+    diasLaborales: 0, asistencias: 0, faltas: 0, retardos: 0, minRetardo: 0, puntuales: 0,
+    diasLibres: 0, horasTrabajadas: 0, horasExtras: 0, horasDebe: 0, incompletas: 0, tiposIncompletas: {}, ejemplos: [],
+  }]));
+  const semanas = {}, meses = {};
+  for (const d of dias) {
+    const e = porEmp.get(String(d.idReloj)); if (!e) continue;
+    const libre = TIPOS_LIBRES.includes(d.excepcion);
+    if (d.laboral && !libre) {
+      e.diasLaborales++;
+      if (d.falta) e.faltas++;
+      else if (d.numChecadas > 0 || d.horasTrabajadas > 0) {
+        e.asistencias++;
+        if (d.esRetardo) { e.retardos++; e.minRetardo += d.retardoMin || 0; } else e.puntuales++;
+      }
+    }
+    if (libre) e.diasLibres++;
+    e.horasTrabajadas += d.horasTrabajadas || 0;
+    e.horasExtras += d.horasExtras || 0;
+    e.horasDebe += d.horasDebe || 0;
+    const tipos = CHECADA_INCOMPLETA.filter(([txt]) => d.alertas.some(a => a.startsWith(txt))).map(t => t[1]);
+    if (tipos.length) {
+      e.incompletas++;
+      for (const t of tipos) e.tiposIncompletas[t] = (e.tiposIncompletas[t] || 0) + 1;
+      if (e.ejemplos.length < 8) e.ejemplos.push({ fecha: d.fecha, tipos });
+    }
+    const ks = motor.inicioDeSemana(d.fecha, diaInicio);
+    const km = d.fecha.slice(0, 7);
+    for (const [obj, k] of [[semanas, ks], [meses, km]]) {
+      const o = (obj[k] = obj[k] || { clave: k, horasExtras: 0, retardos: 0, faltas: 0, porEmp: {} });
+      o.horasExtras += d.horasExtras || 0;
+      if (d.esRetardo) o.retardos++;
+      if (d.falta) o.faltas++;
+      if (d.horasExtras) o.porEmp[d.idReloj] = +((o.porEmp[d.idReloj] || 0) + d.horasExtras).toFixed(2);
+    }
+  }
+  const r2 = n => +n.toFixed(2);
+  const lista = [...porEmp.values()].filter(e => e.diasLaborales || e.horasTrabajadas).map(e => ({
+    ...e, horasTrabajadas: r2(e.horasTrabajadas), horasExtras: r2(e.horasExtras), horasDebe: r2(e.horasDebe),
+    puntualidad: e.asistencias ? Math.round(e.puntuales / e.asistencias * 1000) / 10 : null,
+    asistencia: e.diasLaborales ? Math.round(e.asistencias / e.diasLaborales * 1000) / 10 : null,
+  }));
+  const ordenar = o => Object.values(o).sort((a, b) => a.clave.localeCompare(b.clave))
+    .map(x => ({ ...x, horasExtras: r2(x.horasExtras) }));
+  return {
+    desde, hasta, ultimaChecada: ultima, diaInicioSemana: diaInicio, empresa: parametros.empresa || '',
+    vacacionesDinmec: { ok: vacaciones.ok, error: vacaciones.error || null },
+    empleados: lista, semanas: ordenar(semanas), meses: ordenar(meses),
+  };
+}
+
 // ---------- formatos de dinmec-app contra el reloj (por trabajador) ----------
 // Para cada trabajador que cobra en esa fecha de pago: sus formatos de horas extra,
 // permisos y vacaciones del periodo, y día por día si las horas extra del formato
@@ -736,6 +836,10 @@ const servidor = http.createServer(async (req, res) => {
 
 
       // ---- formatos de dinmec-app contra el reloj ----
+      if (ruta === '/api/dashboard' && req.method === 'GET') {
+        return json(res, 200, await dashboardAsistencia(url.searchParams.get('desde'), url.searchParams.get('hasta')));
+      }
+
       if (ruta === '/api/formatos' && req.method === 'GET') {
         const fecha = url.searchParams.get('fecha');
         if (!fecha) return json(res, 400, { error: 'Falta la fecha de pago' });

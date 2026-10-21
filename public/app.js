@@ -656,6 +656,149 @@ function imprimirResumenes(emps, semana) {
   window.print();
 }
 
+
+// ============================================================
+// VISTA: DASHBOARD DE ASISTENCIA
+// Retardos, tiempo extra, puntualidad, cero ausencias, checadas incompletas
+// y horas extra por semana y por mes, para el rango de fechas elegido.
+// ============================================================
+let DASH = null;
+VISTAS.dashboard = async function () {
+  const hoy = new Date().toISOString().slice(0, 10);
+  let rango = JSON.parse(localStorage.getItem('dash_rango') || 'null');
+  if (!rango) rango = { desde: hoy.slice(0, 7) + '-01', hasta: hoy };
+  contenido.innerHTML = '<div class="tarjeta">Calculando…</div>';
+  DASH = await api(`/api/dashboard?desde=${rango.desde}&hasta=${rango.hasta}`);
+  pintarDashboard(rango);
+};
+
+function pintarDashboard(rango) {
+  const D = DASH;
+  const E = D.empleados;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const mesNom = k => new Date(k + '-15T12:00:00').toLocaleDateString('es-MX', { month: 'short', year: '2-digit' });
+  const presets = {
+    'Este mes': () => ({ desde: hoy.slice(0, 7) + '-01', hasta: hoy }),
+    'Mes pasado': () => { const d = new Date(hoy.slice(0, 7) + '-01T12:00:00'); d.setMonth(d.getMonth() - 1);
+      const ini = d.toISOString().slice(0, 10); return { desde: ini, hasta: sumarDias(hoy.slice(0, 7) + '-01', -1) }; },
+    'Últimos 3 meses': () => ({ desde: sumarDias(hoy, -91), hasta: hoy }),
+    'Este año': () => ({ desde: hoy.slice(0, 4) + '-01-01', hasta: hoy }),
+  };
+  const sum = k => E.reduce((a, e) => a + (e[k] || 0), 0);
+  const totLab = sum('diasLaborales'), totAsis = sum('asistencias');
+  const pct = (a, b) => b ? (Math.round(a / b * 1000) / 10) + '%' : '—';
+
+  const top = (arr, n = 10) => arr.slice(0, n);
+  const ranking = (arr, valor, detalle, max) => arr.length ? `<ol class="rank">${arr.map((e, i) => `<li>
+      <span class="pos">${i + 1}</span>
+      <div><div class="nom">${esc(e.nombre)} <span class="det">#${e.idReloj}</span></div><div class="det">${detalle(e)}</div>
+        ${max ? `<div class="barra" style="width:${Math.max(3, Math.round(parseFloat(valor(e, true)) / max * 100))}%"></div>` : ''}</div>
+      <span class="val">${valor(e)}</span></li>`).join('')}</ol>` : '<p class="dash-sub">Sin datos en el rango.</p>';
+
+  const masRetardos = top(E.filter(e => e.retardos).sort((a, b) => b.retardos - a.retardos || b.minRetardo - a.minRetardo));
+  const masExtra = top(E.filter(e => e.horasExtras).sort((a, b) => b.horasExtras - a.horasExtras));
+  const minDias = Math.max(1, Math.floor(Math.max(...E.map(e => e.asistencias), 0) * 0.6));
+  const puntuales = top(E.filter(e => e.asistencias >= minDias && e.puntualidad != null)
+    .sort((a, b) => b.puntualidad - a.puntualidad || a.minRetardo - b.minRetardo || b.asistencias - a.asistencias));
+  const ceroFaltas = E.filter(e => e.diasLaborales && e.faltas === 0).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const conFaltas = E.filter(e => e.faltas).sort((a, b) => b.faltas - a.faltas);
+  const noChecan = top(E.filter(e => e.incompletas).sort((a, b) => b.incompletas - a.incompletas), 12);
+
+  const barras = (lista, clase, etiqueta) => {
+    const max = Math.max(...lista.map(x => x.horasExtras), 0.01);
+    return lista.length ? `<div class="barras">${lista.map(x => `<div class="col ${clase}" title="${esc(etiqueta(x, true))}: ${horasYMin(x.horasExtras) || '0'} · ${Object.keys(x.porEmp).length} persona(s)">
+        <div class="b" style="height:${Math.round(x.horasExtras / max * 100)}%"><span>${Math.round(x.horasExtras)}</span></div>
+        <div class="et">${esc(etiqueta(x))}</div></div>`).join('')}</div>` : '<p class="dash-sub">Sin horas extra en el rango.</p>';
+  };
+  const etSemana = (x, largo) => largo ? `Semana del ${fechaBonita(x.clave)} al ${fechaBonita(sumarDias(x.clave, 6))}` : fechaBonita(x.clave).replace(/ \d{4}$/, '');
+
+  const COLS_TABLA = [
+    ['nombre', 'Trabajador'], ['diasLaborales', 'Días lab.'], ['asistencias', 'Asistió'], ['faltas', 'Faltas'],
+    ['asistencia', '% asist.'], ['retardos', 'Retardos'], ['minRetardo', 'Min. retardo'], ['puntualidad', '% puntual'],
+    ['horasExtras', 'H.E.'], ['horasDebe', 'Debe'], ['incompletas', 'Checadas incompletas'], ['diasLibres', 'Permiso/vac.'],
+  ];
+  const orden = JSON.parse(localStorage.getItem('dash_orden') || '{"k":"horasExtras","d":-1}');
+  const tabla = E.slice().sort((a, b) => {
+    const x = a[orden.k] ?? -1, y = b[orden.k] ?? -1;
+    return (typeof x === 'string' ? x.localeCompare(y) : x - y) * orden.d;
+  });
+
+  contenido.innerHTML = `
+    <div class="tarjeta">
+      <div class="fila-controles">
+        <div class="campo"><label>Desde</label><input type="date" id="dash-desde" value="${rango.desde}"></div>
+        <div class="campo"><label>Hasta</label><input type="date" id="dash-hasta" value="${rango.hasta}"></div>
+        <button class="btn btn-primario" id="dash-ver">Ver</button>
+        ${Object.keys(presets).map(p => `<button class="btn btn-mini" data-preset="${esc(p)}">${esc(p)}</button>`).join('')}
+        <span style="flex:1"></span>
+        <button class="btn btn-azul" id="dash-imprimir">🖨️ Imprimir</button>
+      </div>
+      <p class="texto-chico">Analizado: <b>${fechaBonita(D.desde)}</b> al <b>${fechaBonita(D.hasta)}</b>${D.ultimaChecada && rango.hasta > D.ultimaChecada ? ` (la última checada cargada es del ${fechaBonita(D.ultimaChecada)})` : ''}.
+        Se usan las mismas reglas de la nómina: turno, tolerancia, vacaciones de dinmec-app, excepciones y horas extra autorizadas por formato.</p>
+    </div>
+
+    <div class="kpis">
+      <div class="kpi"><div class="valor">${E.length}</div><div class="nombre">Personas con actividad</div></div>
+      <div class="kpi"><div class="valor">${pct(totAsis, totLab)}</div><div class="nombre">Asistencia (${totAsis} de ${totLab} días)</div></div>
+      <div class="kpi"><div class="valor">${pct(totAsis - sum('retardos'), totAsis)}</div><div class="nombre">Puntualidad general</div></div>
+      <div class="kpi"><div class="valor" style="color:var(--rojo)">${sum('faltas')}</div><div class="nombre">Faltas</div></div>
+      <div class="kpi"><div class="valor" style="color:var(--ambar)">${sum('retardos')}</div><div class="nombre">Retardos (${Math.round(sum('minRetardo') / 60)} h perdidas)</div></div>
+      <div class="kpi"><div class="valor">${Math.round(sum('horasExtras'))} h</div><div class="nombre">Horas extra autorizadas</div></div>
+      <div class="kpi"><div class="valor">${sum('incompletas')}</div><div class="nombre">Días con checadas incompletas</div></div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="tarjeta"><h3>⏰ Más retardos</h3><div class="dash-sub">Número de retardos y minutos acumulados</div>
+        ${ranking(masRetardos, (e, n) => n ? e.retardos : e.retardos + ' ret.', e => `${e.minRetardo} min en total · ${e.asistencias} días asistidos`, masRetardos[0]?.retardos)}</div>
+      <div class="tarjeta"><h3>💪 Más tiempo extra</h3><div class="dash-sub">Horas extra que entran a la nómina</div>
+        ${ranking(masExtra, (e, n) => n ? e.horasExtras : horasYMin(e.horasExtras), e => `${esc(e.puesto || '')}${e.horasDebe ? ' · debe ' + horasYMin(e.horasDebe) : ''}`, masExtra[0]?.horasExtras)}</div>
+      <div class="tarjeta"><h3>🏅 Más puntuales</h3><div class="dash-sub">% de días que llegó a tiempo (mínimo ${minDias} días asistidos)</div>
+        ${ranking(puntuales, (e, n) => n ? e.puntualidad : e.puntualidad + '%', e => `${e.puntuales} de ${e.asistencias} días a tiempo${e.retardos ? ' · ' + e.minRetardo + ' min de retardo' : ''}`, 100)}</div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="tarjeta"><h3>✅ Cero ausencias (${ceroFaltas.length})</h3><div class="dash-sub">Asistieron todos sus días laborales del rango (los días de permiso o vacaciones no cuentan como falta)</div>
+        <div class="chips">${ceroFaltas.map(e => `<span class="etiqueta et-verde" title="${e.asistencias} días">${esc(e.nombre)}</span>`).join('') || '<span class="dash-sub">Nadie en el rango.</span>'}</div>
+        ${conFaltas.length ? `<h3 style="margin-top:14px">❌ Con faltas (${conFaltas.length})</h3><div class="chips">${conFaltas.map(e => `<span class="etiqueta et-rojo">${esc(e.nombre)}: ${e.faltas}</span>`).join('')}</div>` : ''}</div>
+      <div class="tarjeta"><h3>🕳️ No checan algún horario</h3><div class="dash-sub">Días con entrada, salida o descansos sin checar</div>
+        ${ranking(noChecan, (e, n) => n ? e.incompletas : e.incompletas + ' días', e => Object.entries(e.tiposIncompletas).sort((a, b) => b[1] - a[1]).map(([t, n]) => `${esc(t)}: ${n}`).join(' · '), noChecan[0]?.incompletas)}</div>
+    </div>
+
+    <div class="dash-grid">
+      <div class="tarjeta"><h3>📅 Horas extra por semana</h3><div class="dash-sub">Semana de nómina (inicia ${['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][D.diaInicioSemana] || 'viernes'}) · total ${Math.round(sum('horasExtras'))} h</div>
+        ${barras(D.semanas, '', etSemana)}</div>
+      <div class="tarjeta"><h3>🗓️ Horas extra por mes</h3><div class="dash-sub">Mes calendario</div>
+        ${barras(D.meses, 'mes', (x, largo) => largo ? mesNom(x.clave) : mesNom(x.clave))}
+        ${D.meses.length ? `<div class="tabla-scroll" style="margin-top:10px"><table><thead><tr><th>Mes</th><th>H.E.</th><th>Personas con H.E.</th><th>Retardos</th><th>Faltas</th></tr></thead><tbody>
+          ${D.meses.map(m => `<tr><td>${mesNom(m.clave)}</td><td><b>${horasYMin(m.horasExtras) || '0'}</b></td><td>${Object.keys(m.porEmp).length}</td><td>${m.retardos}</td><td>${m.faltas}</td></tr>`).join('')}</tbody></table></div>` : ''}</div>
+    </div>
+
+    <div class="tarjeta"><h3 style="color:var(--azul)">Todos los trabajadores</h3><div class="dash-sub">Haz clic en un encabezado para ordenar</div>
+      <div class="tabla-scroll"><table><thead><tr>${COLS_TABLA.map(([k, t]) => `<th class="ordenable" data-orden="${k}">${t}${orden.k === k ? (orden.d > 0 ? ' ▲' : ' ▼') : ''}</th>`).join('')}</tr></thead>
+        <tbody>${tabla.map(e => `<tr><td><b>${esc(e.nombre)}</b> <span class="texto-chico">#${e.idReloj}</span></td>
+          <td class="num">${e.diasLaborales}</td><td class="num">${e.asistencias}</td>
+          <td class="num">${e.faltas ? `<span class="etiqueta et-rojo">${e.faltas}</span>` : '0'}</td>
+          <td class="num">${e.asistencia ?? '—'}${e.asistencia != null ? '%' : ''}</td>
+          <td class="num">${e.retardos ? `<span class="etiqueta et-ambar">${e.retardos}</span>` : '0'}</td>
+          <td class="num">${e.minRetardo || ''}</td><td class="num">${e.puntualidad ?? '—'}${e.puntualidad != null ? '%' : ''}</td>
+          <td class="num"><b>${horasYMin(e.horasExtras)}</b></td><td class="num">${e.horasDebe ? horasYMin(e.horasDebe) : ""}</td>
+          <td class="num" title="${esc(Object.entries(e.tiposIncompletas).map(([t, n]) => t + ': ' + n).join(', '))}">${e.incompletas || ''}</td>
+          <td class="num">${e.diasLibres || ''}</td></tr>`).join('')}</tbody></table></div></div>`;
+
+  const ir = r => { localStorage.setItem('dash_rango', JSON.stringify(r)); VISTAS.dashboard(); };
+  $('#dash-ver').addEventListener('click', () => ir({ desde: $('#dash-desde').value, hasta: $('#dash-hasta').value }));
+  contenido.querySelectorAll('[data-preset]').forEach(b => b.addEventListener('click', () => ir(presets[b.dataset.preset]())));
+  contenido.querySelectorAll('[data-orden]').forEach(th => th.addEventListener('click', () => {
+    const k = th.dataset.orden;
+    localStorage.setItem('dash_orden', JSON.stringify({ k, d: orden.k === k ? -orden.d : (k === 'nombre' ? 1 : -1) }));
+    pintarDashboard(rango);
+  }));
+  $('#dash-imprimir').addEventListener('click', () => {
+    $('#zona-impresion').innerHTML = `<div class="dash-print"><h2>${esc(DASH.empresa || 'DINMEC')} — Dashboard de asistencia · ${fechaBonita(DASH.desde)} al ${fechaBonita(DASH.hasta)}</h2>${contenido.innerHTML}</div>`;
+    window.print();
+  });
+}
+
 // ============================================================
 // VISTA: DETALLE DIARIO
 // ============================================================

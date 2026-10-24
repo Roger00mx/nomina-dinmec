@@ -274,15 +274,26 @@ function calcularDia(fecha, empleado, turno, minutos, excepcion, parametros, esF
     // sale 18:02 -> extra 1 h 02 min (de 17:00 a 18:02); los 6 min de antes no cuentan.
     const umbral = parametros.umbralHorasExtra ?? 0.5;
     const salidaTurno = aMin(turno.horaSalida) + (turno.cruzaMedianoche ? 1440 : 0);
-    const antesMin = c.entradaAsumida ? 0 : Math.max(0, entradaTurno - entrada);
-    const despuesMin = c.salidaAsumida ? 0 : Math.max(0, salida - salidaTurno);
+    // Las salidas/ausencias (permisos) se reparten: lo que cae ANTES de la entrada o
+    // DESPUÉS de la salida del turno solo reduce el tiempo extra; lo que cae dentro
+    // del horario es tiempo que debe.
+    const solape = (a, b, x, y) => Math.max(0, Math.min(b, y) - Math.max(a, x));
+    let permAntes = 0, permDespues = 0, permDentro = 0;
+    for (const p of c.permisos) {
+      if (p.reg == null) { permDentro += p.minutos || 0; continue; }
+      permAntes += solape(p.sal, p.reg, -1e9, entradaTurno);
+      permDespues += solape(p.sal, p.reg, salidaTurno, 1e9);
+      permDentro += solape(p.sal, p.reg, entradaTurno, salidaTurno);
+    }
+    const antesMin = c.entradaAsumida ? 0 : Math.max(0, Math.min(entradaTurno, salida) - entrada - permAntes);
+    const despuesMin = c.salidaAsumida ? 0 : Math.max(0, salida - Math.max(salidaTurno, entrada) - permDespues);
     const antes = antesMin / 60 >= umbral ? antesMin / 60 : 0;
     const despues = despuesMin / 60 >= umbral ? despuesMin / 60 : 0;
     const bruto = antes + despues;
 
     // Lo que le faltó DENTRO de su horario (retardo, exceso de descansos, permisos,
     // salida anticipada) se descuenta de esas horas extra del mismo día.
-    const dentro = minTrabajados / 60 - antesMin / 60 - despuesMin / 60;
+    const dentro = (solape(entrada, salida, entradaTurno, salidaTurno) - permDentro - descuentoDescansos) / 60;
     let debe = diaLibre ? 0 : Math.max(0, dia.horasEsperadas - dentro);
     if (debe < 5 / 60) debe = 0;
     dia.heBruta = redondearExtra(bruto, parametros);
@@ -425,6 +436,42 @@ function calcularPeriodo(opciones) {
 
     const semanasEmp = [];
 
+    // Turno que le toca a una fecha (para saber su hora de entrada), con las mismas
+    // prioridades del cálculo: horario personalizado, cambio de turno, asignación, S2/S1.
+    const turnoDeFecha = f => {
+      const hp = horarioPorDia[empleado.idReloj + '_' + f];
+      if (hp) return hp;
+      const ex = excPorClave[empleado.idReloj + '_' + f];
+      if (ex && ex.tipo === 'Cambio turno' && turnosPorCodigo[ex.turnoAlternativo]) return turnosPorCodigo[ex.turnoAlternativo];
+      const dif = Math.round((new Date(f + 'T12:00:00') - new Date(fechaInicio + 'T12:00:00')) / 86400000);
+      const sIdx = Math.floor(dif / 7);
+      const asig = asigPorClave[empleado.idReloj + '_' + sumarDias(fechaInicio, sIdx * 7)];
+      const cod = asig || ((sIdx === 1 && empleado.turnoS2) ? empleado.turnoS2 : empleado.turnoS1);
+      return turnosPorCodigo[cod] || turnosPorCodigo[empleado.turnoS1];
+    };
+    // ¿La noche anterior a `f` se queda con las checadas tempranas de `f`?
+    // Sí cuando el día anterior (turno de día) terminó con una checada suelta en la
+    // tarde/noche (número impar de checadas, la última después de las 15:00). Solo se
+    // llevan las checadas de `f` que están antes de 10:00 y al menos 90 min antes de
+    // su hora de entrada, y a no más de 14 h de esa entrada suelta.
+    const nocheAnteriorReclama = f => {
+      const ant = sumarDias(f, -1);
+      const tAnt = turnoDeFecha(ant);
+      if (!tAnt || tAnt.cruzaMedianoche) return null;
+      const ventana = parametros.ventanaDobleChecada ?? 5;
+      let ms = lista.filter(ch => ch.fecha === ant).map(ch => aMin(ch.hora.slice(0, 5))).filter(m => m >= 300).sort((a, b) => a - b);
+      ms = ms.filter((m, i) => i === 0 || m - ms[i - 1] > ventana);
+      if (!ms.length || ms.length % 2 === 0) return null;
+      const ultima = ms[ms.length - 1];
+      if (ultima < 900) return null;
+      const tHoy = turnoDeFecha(f);
+      const entradaHoy = tHoy && !tHoy.cruzaMedianoche ? aMin(tHoy.horaEntrada) : 1440;
+      const limite = Math.min(entradaHoy - 90, 600, ultima - 1440 + 14 * 60);
+      if (limite <= 300) return null;
+      const hay = lista.some(ch => ch.fecha === f && (m => m >= 300 && m < limite)(aMin(ch.hora.slice(0, 5))));
+      return hay ? { limite } : null;
+    };
+
     for (let s = 0; s < numSemanas; s++) {
       const iniSem = sumarDias(fechaInicio, s * 7);
       // Turno de la semana: 1° la asignación especial de esa semana (horario temporal),
@@ -474,10 +521,20 @@ function calcularPeriodo(opciones) {
         } else {
           // Checadas de madrugada (antes de las 5:00) pertenecen al día anterior:
           // son salidas tardías de quien trabajó horas extra pasada la medianoche.
+          // Además, si el día anterior quedó con una ENTRADA suelta en la tarde/noche
+          // (ej. sábado de descanso entra 18:53) la salida de la madrugada siguiente
+          // (05:03, antes de su hora de entrada) es de esa misma jornada, no una entrada nueva.
+          const sig = sumarDias(fecha, 1);
+          const quitarHoy = nocheAnteriorReclama(fecha);
+          const llevarSig = nocheAnteriorReclama(sig);
           for (const ch of lista) {
             const m = aMin(ch.hora.slice(0, 5));
-            if (ch.fecha === fecha && m >= 300) minutosDia.push(m);
-            else if (ch.fecha === sumarDias(fecha, 1) && m < 300) minutosDia.push(m + 1440);
+            if (ch.fecha === fecha && m >= 300) {
+              if (quitarHoy && m < quitarHoy.limite) continue;
+              minutosDia.push(m);
+            } else if (ch.fecha === sig && (m < 300 || (llevarSig && m < llevarSig.limite))) {
+              minutosDia.push(m + 1440);
+            }
           }
         }
         minutosDia.sort((a, b) => a - b);

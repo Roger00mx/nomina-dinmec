@@ -828,20 +828,38 @@ function tarjetaEmpleadoHTML(idReloj, dias, FDIA, FALL, FERR) {
     tot.ret += d.esRetardo ? 1 : 0; tot.faltas += d.falta ? 1 : 0;
 
     const tareas = (f.tareas || []);
-    const formato = tareas.length ? tareas.map(t => `<div class="tj-formato">
-        <b>${esc(t.horaInicio || '?')} – ${esc(t.horaFin || 'pend.')}</b> <span>${t.horas != null ? hhmmDeHoras(t.horas) : ''}</span>
-        <a href="#" data-formato="${esc(t.solicitudId)}" data-tipo="he" title="Ver el formato que capturó">${esc(t.folio)} 🔎</a>${t.firme ? '' : ' <span class="tj-pend">sin autorizar</span>'}</div>`).join('') : '';
-    const obs = [];
-    if (d.falta) obs.push('<b class="tj-rojo">FALTA</b>');
-    if (d.esRetardo) obs.push(`<span class="tj-rojo">Retardo +${d.retardoMin} min</span>`);
-    if (f.vacaciones || d.excepcion === 'Vacaciones') obs.push('🏖 Vacaciones');
-    for (const b of (f.permisos || [])) obs.push(`🚪 Permiso ${esc(b.horaSalida || '')}–${esc(b.horaRegreso || '')} <a href="#" data-formato="${esc(b.solicitudId)}" data-tipo="ps">${esc(b.folio)} 🔎</a> (${b.pagaHoras ? 'se pagan' : 'las repone'})`);
-    if (d.excepcion && d.excepcion !== 'Vacaciones') obs.push(esc(d.excepcion));
-    if (d.horasDebe) obs.push(`<span class="tj-rojo">Debe ${horasYMin(d.horasDebe)}${heReloj ? ' (se resta de sus H.E. del día)' : ''}</span>`);
-    if (f.estado && f.estado !== 'sin_extra' && f.estado !== 'coincide' && ESTADO_CONC[f.estado]) obs.push(`<span class="etiqueta ${ESTADO_CONC[f.estado].c}">${ESTADO_CONC[f.estado].t}</span>`);
-    if (f.decision) obs.push(f.decision.usar === 'formato' ? '✔ Autorizado por formato' : '🔗 Emparejado con reloj');
-    const otras = (d.checadas || []).length > 6 ? `<div class="tj-chec">Todas: ${(d.checadas || []).map(esc).join(' · ')}</div>` : '';
+    // Horario según formato: dos pares inicio/fin (si hay más tareas, se apilan en el segundo par)
+    const hi = t => `${esc(t.horaInicio || '?')}`, hf = t => `${esc(t.horaFin || 'pend.')}`;
+    const t1 = tareas[0], resto = tareas.slice(1);
+    const celdaPar = (lista, fn) => lista.map(t => `<div>${fn(t)}</div>`).join('');
 
+    // Resultado: comparación reloj contra formato + lo que pasó ese día
+    const res = [];
+    if (d.falta) res.push('<b class="tj-rojo">FALTA</b>');
+    if (f.estado && f.estado !== 'sin_extra' && ESTADO_CONC[f.estado]) res.push(`<span class="etiqueta ${ESTADO_CONC[f.estado].c}">${ESTADO_CONC[f.estado].t}</span>`);
+    if (heReloj || tareas.length) res.push(`<span class="tj-chec">Reloj ${hhmmDeHoras(heReloj) || '00:00'}${tareas.length ? ' · Formato ' + (hhmmDeHoras(f.horasFormato) || '00:00') : ''}</span>`);
+    if (d.esRetardo) res.push(`<span class="tj-rojo">Retardo +${d.retardoMin} min</span>`);
+    if (d.horasDebe) res.push(`<span class="tj-rojo">Debe ${hhmmDeHoras(d.horasDebe)}${heReloj ? ' (se resta de H.E.)' : ''}</span>`);
+    if (f.vacaciones || d.excepcion === 'Vacaciones') res.push('🏖 Vacaciones');
+    for (const b of (f.permisos || [])) res.push(`🚪 Permiso ${esc(b.horaSalida || '')}–${esc(b.horaRegreso || '')} (${b.pagaHoras ? 'se pagan' : 'repone'})`);
+    if (d.excepcion && d.excepcion !== 'Vacaciones') res.push(esc(d.excepcion));
+    if (f.decision) res.push(f.decision.usar === 'formato' ? `<span class="tj-ok">✔ Autorizado por formato${f.decision.nota ? ': ' + esc(f.decision.nota) : ''}</span>` : '<span class="tj-ok">🔗 Emparejado con reloj</span>');
+
+    // Ver formato: un enlace por folio (H.E. y permisos)
+    const vistos = new Set();
+    const links = [...tareas.map(t => ({ id: t.solicitudId, folio: t.folio, tipo: 'he', firme: t.firme })),
+                   ...(f.permisos || []).map(b => ({ id: b.solicitudId, folio: b.folio, tipo: 'ps', firme: b.firme }))]
+      .filter(x => !vistos.has(x.id) && vistos.add(x.id))
+      .map(x => `<div><a href="#" class="tj-link" data-formato="${esc(x.id)}" data-tipo="${x.tipo}">🔎 ${esc(x.folio)}</a>${x.firme ? '' : ' <span class="tj-pend">sin autorizar</span>'}</div>`).join('');
+
+    // Acción: autorizar formato / emparejar con reloj / quitar decisión / editar horario
+    let accion = '';
+    if (f.decision) accion = `<button class="btn btn-mini" data-quitar="${d.fecha}" title="Quitar decisión: vuelve a pagarse lo del reloj">↺ Quitar</button>`;
+    else if (tareas.length) accion = `<button class="btn btn-mini btn-primario" data-autorizar="${d.fecha}" title="Pagar las horas del formato este día">✔ Autorizar</button>
+        <button class="btn btn-mini" data-emparejar="${d.fecha}" title="Revisado: se paga lo del reloj">🔗 Emparejar</button>`;
+    accion += ` <button class="btn btn-mini btn-editar-dia" data-fecha="${d.fecha}" title="Editar entrada/salida a mano">${d.editadoManual ? '✏️✔' : '✏️'}</button>`;
+
+    const otras = (d.checadas || []).length > 6 ? `<div class="tj-chec">Todas: ${(d.checadas || []).map(esc).join(' · ')}</div>` : '';
     const cls = d.falta ? 'tj-falta' : (!d.laboral ? 'tj-nolab' : '');
     const dif = tareas.length ? Math.abs((f.horasFormato || 0) - (heReloj || 0)) : 0;
     return `<tr class="${cls}">
@@ -851,13 +869,15 @@ function tarjetaEmpleadoHTML(idReloj, dias, FDIA, FALL, FERR) {
       <td>${limpio(d.salDesayuno)}</td><td>${limpio(d.regDesayuno)}</td>
       <td>${limpio(d.salComida)}</td><td>${limpio(d.regComida)}</td>
       <td><b>${limpio(d.salida)}</b>${otras}</td>
-      <td class="tj-horas">${hhmmDeHoras(d.horasTrabajadas) || (d.laboral ? '00:00' : '')}</td>
-      <td class="tj-fmt">${formato}</td>
-      <td class="tj-num">${hhmmDeHoras(heReloj)}</td>
-      <td class="tj-num ${tareas.length && dif > 0.25 ? 'tj-dif' : ''}">${tareas.length ? hhmmDeHoras(f.horasFormato) : ''}</td>
+      <td class="tj-fmt">${t1 ? `<b>${hi(t1)}</b>` : ''}</td>
+      <td class="tj-fmt">${t1 ? `<b>${hf(t1)}</b>` : ''}</td>
+      <td class="tj-fmt">${celdaPar(resto, t => `<b>${hi(t)}</b>`)}</td>
+      <td class="tj-fmt">${celdaPar(resto, t => `<b>${hf(t)}</b>`)}</td>
+      <td class="tj-obs ${tareas.length && dif > 0.25 ? 'tj-res-dif' : ''}">${res.join('<br>')}</td>
       <td class="tj-num"><b>${hhmmDeHoras(d.horasExtras)}</b></td>
-      <td class="tj-obs">${obs.join('<br>')}</td>
-      <td class="no-imprimir"><button class="btn btn-mini btn-editar-dia" data-fecha="${d.fecha}" title="Editar entrada/salida a mano">${d.editadoManual ? '✏️✔' : '✏️'}</button></td>
+      <td class="tj-horas">${hhmmDeHoras(d.horasTrabajadas) || (d.laboral ? '00:00' : '')}</td>
+      <td class="tj-ver">${links}</td>
+      <td class="tj-accion no-imprimir">${accion}</td>
     </tr>`;
   }).join('');
   const dif = +(tot.esp - tot.trab).toFixed(2);
@@ -879,10 +899,15 @@ function tarjetaEmpleadoHTML(idReloj, dias, FDIA, FALL, FERR) {
           <tr><th>COSTO H. EXTRA:</th><td>${dinero2(res.costoHoraExtra ?? emp.costoHoraExtra)}</td></tr></table>
       </div>
       <div class="tabla-scroll"><table class="tj-tabla">
-        <thead><tr><th></th><th>FECHA</th><th>HORA DE ENTRADA</th><th>SALIDA DESAYUNO</th><th>REGRESO DESAYUNO</th>
-          <th>SALIDA A COMER</th><th>REGRESO DE COMER</th><th>SALIDA</th><th>HORAS TRABAJADAS</th>
-          <th class="tj-th-fmt">FORMATO H.E.<br>INICIO – FIN</th><th>H.E. RELOJ</th><th>H.E. FORMATO</th><th>H.E. A PAGAR</th><th>OBSERVACIONES</th><th class="no-imprimir"></th></tr></thead>
-        <tbody>${filas || `<tr><td colspan="15" style="padding:14px">${esc(nombre)} no cobra en el pago del ${fechaBonita(NOMINA.fechaPago)}${(NOMINA.noCobranHoy || []).some(x => String(x.idReloj) === String(idReloj)) ? ' (su grupo quincenal cobra la siguiente semana): cambia la fecha de pago para ver su quincena' : ''}.</td></tr>`}</tbody>
+        <thead>
+          <tr><th rowspan="2"></th><th rowspan="2">FECHA</th><th rowspan="2">HORA DE ENTRADA</th><th rowspan="2">SALIDA DESAYUNO</th><th rowspan="2">REGRESO DESAYUNO</th>
+            <th rowspan="2">SALIDA A COMER</th><th rowspan="2">REGRESO DE COMER</th><th rowspan="2">SALIDA</th>
+            <th colspan="4" class="tj-th-grupo">HORARIO SEGÚN FORMATO</th>
+            <th rowspan="2" class="tj-th-grupo">RESULTADO</th><th rowspan="2" class="tj-th-grupo">SE PAGA</th>
+            <th rowspan="2">HORAS TRABAJADAS</th><th class="tj-th-grupo">VER FORMATO</th><th rowspan="2" class="tj-th-accion no-imprimir">ACCIÓN</th></tr>
+          <tr><th>INICIO</th><th>FIN</th><th>INICIO</th><th>FIN</th><th>LINK</th></tr>
+        </thead>
+        <tbody>${filas || `<tr><td colspan="17" style="padding:14px">${esc(nombre)} no cobra en el pago del ${fechaBonita(NOMINA.fechaPago)}${(NOMINA.noCobranHoy || []).some(x => String(x.idReloj) === String(idReloj)) ? ' (su grupo quincenal cobra la siguiente semana): cambia la fecha de pago para ver su quincena' : ''}.</td></tr>`}</tbody>
       </table></div>
       <div class="tj-pie">
         <table class="tj-tot">
@@ -903,8 +928,9 @@ function tarjetaEmpleadoHTML(idReloj, dias, FDIA, FALL, FERR) {
           <tr><th>PERMISOS</th><td>${(fEmp?.permisos || []).length}</td></tr>
         </table>
       </div>
-      <p class="tj-nota">Horas en formato hh:mm. <b>Formato H.E. inicio – fin</b> = horario que el trabajador capturó en dinmec-app (🔎 abre el formato completo); debe cuadrar con la hora de salida del reloj.
-        <b>H.E. formato</b> en rojo = difiere más de 15 min de lo que marca el reloj. Lo autorizado en «Formatos vs reloj» se refleja en <b>H.E. a pagar</b>.</p>
+      <p class="tj-nota">Horas en formato hh:mm. <b>Horario según formato</b> = inicio y fin que el trabajador capturó en dinmec-app (hasta dos tareas por día; si hay más se apilan); debe cuadrar con la salida (o entrada) del reloj.
+        <b>Resultado</b> en rojo = el formato difiere más de 15 min del reloj. <b>Se paga</b> = horas extra que entran a la nómina. <b>🔎</b> abre el formato completo.
+        <b>Acción</b>: ✔ Autorizar paga las horas del formato ese día aunque no aparezcan en el reloj; 🔗 Emparejar deja constancia de revisión y paga lo del reloj.</p>
       <div class="firmas tj-firmas"><div>Trabajador</div><div>Recursos Humanos</div></div>
     </div>`;
 }
@@ -1025,6 +1051,28 @@ VISTAS.detalle = async function () {
       }));
       tarjetaTabla.querySelectorAll('.btn-editar-dia').forEach(btn =>
         btn.addEventListener('click', () => editarDia(NOMINA.dias.find(d => d.idReloj == emp && d.fecha === btn.dataset.fecha))));
+      tarjetaTabla.querySelectorAll('[data-autorizar],[data-emparejar],[data-quitar]').forEach(btn => btn.addEventListener('click', async () => {
+        const fecha = btn.dataset.autorizar || btn.dataset.emparejar || btn.dataset.quitar;
+        const f = FDIA[emp + '_' + fecha] || {};
+        const folios = (f.folios || []).join(', ');
+        let cuerpo;
+        if (btn.dataset.autorizar) {
+          const txt = prompt(`Horas extra a pagar el ${fechaBonita(fecha)} según formato ${folios}.\nReloj: ${hhmmDeHoras(f.horasExtrasReloj) || '00:00'} · Formato: ${hhmmDeHoras(f.horasFormato) || '00:00'}\n(escribe horas en decimal, ej. 2.5)`, String(f.horasFormato || 0));
+          if (txt == null) return;
+          const horas = Number(String(txt).replace(',', '.'));
+          if (isNaN(horas) || horas < 0 || horas > 24) return alert('Horas inválidas');
+          const nota = prompt('Nota / motivo (opcional):', '') || '';
+          cuerpo = { idReloj: Number(emp), fecha, usar: 'formato', horas, folios, nota };
+        } else if (btn.dataset.emparejar) {
+          cuerpo = { idReloj: Number(emp), fecha, usar: 'reloj', folios, nota: '' };
+        } else {
+          if (!confirm('¿Quitar la decisión de este día? Vuelve a pagarse lo que marca el reloj.')) return;
+          cuerpo = { idReloj: Number(emp), fecha, usar: null };
+        }
+        btn.disabled = true;
+        try { await api('/api/conciliacion', { method: 'PUT', body: cuerpo }); navegar('detalle'); }
+        catch (err) { alert(err.message); btn.disabled = false; }
+      }));
       return;
     }
 

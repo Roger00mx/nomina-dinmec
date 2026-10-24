@@ -549,7 +549,7 @@ function detalleTrabajadorFormatos(e) {
           <td>${x.horasExtrasReloj ? horasYMin(x.horasExtrasReloj) : '—'}</td>
           <td>${celdaFormato(e, x)}</td>
           <td>${ESTADO_CONC[x.estado].t ? `<span class="etiqueta ${ESTADO_CONC[x.estado].c}">${ESTADO_CONC[x.estado].t}</span>` : ''}</td>
-          <td><b>${x.horasExtrasPagadas ? horasYMin(x.horasExtrasPagadas) : '—'}</b></td>
+          <td><b>${x.horasExtrasPagadas ? horasYMin(x.horasExtrasPagadas) : '—'}</b>${x.horasDebe && x.horasExtrasReloj ? `<div class="texto-chico" style="color:var(--rojo)">−${horasYMin(x.horasDebe)} que debe ese día</div>` : ''}</td>
           <td class="texto-chico">${x.vacaciones ? '🏖 Vacaciones' : ''}${x.permisos.map(b => `🚪 Permiso ${esc(b.horaSalida || '')}–${esc(b.horaRegreso || '')}`).join('<br>')}${x.excepcion && !x.vacaciones ? esc(x.excepcion) : ''}</td>
           <td style="white-space:nowrap">${accion(x)}</td></tr>`).join('')}</tbody>
       </table></div>` : '<p class="texto-chico">Sin horas extra, formatos ni permisos en el periodo.</p>'}
@@ -837,7 +837,7 @@ function tarjetaEmpleadoHTML(idReloj, dias, FDIA, FALL, FERR) {
     if (f.vacaciones || d.excepcion === 'Vacaciones') obs.push('🏖 Vacaciones');
     for (const b of (f.permisos || [])) obs.push(`🚪 Permiso ${esc(b.horaSalida || '')}–${esc(b.horaRegreso || '')} <a href="#" data-formato="${esc(b.solicitudId)}" data-tipo="ps">${esc(b.folio)} 🔎</a> (${b.pagaHoras ? 'se pagan' : 'las repone'})`);
     if (d.excepcion && d.excepcion !== 'Vacaciones') obs.push(esc(d.excepcion));
-    if (d.horasDebe) obs.push(`<span class="tj-rojo">Debe ${horasYMin(d.horasDebe)}</span>`);
+    if (d.horasDebe) obs.push(`<span class="tj-rojo">Debe ${horasYMin(d.horasDebe)}${heReloj ? ' (se resta de sus H.E. del día)' : ''}</span>`);
     if (f.estado && f.estado !== 'sin_extra' && f.estado !== 'coincide' && ESTADO_CONC[f.estado]) obs.push(`<span class="etiqueta ${ESTADO_CONC[f.estado].c}">${ESTADO_CONC[f.estado].t}</span>`);
     if (f.decision) obs.push(f.decision.usar === 'formato' ? '✔ Autorizado por formato' : '🔗 Emparejado con reloj');
     const otras = (d.checadas || []).length > 6 ? `<div class="tj-chec">Todas: ${(d.checadas || []).map(esc).join(' · ')}</div>` : '';
@@ -1061,7 +1061,7 @@ VISTAS.detalle = async function () {
       let resumenDia = '';
       if (d.horasDebe) {
         resumenDia = `<span class="etiqueta et-rojo">Debe ${horasYMin(d.horasDebe)}</span>
-          <div class="texto-chico">Trabajó ${horasYMin(d.horasTrabajadas)} de ${horasYMin(d.horasEsperadas)}: se descuenta de sus H.E. o del banco de horas</div>`;
+          <div class="texto-chico">Le faltó tiempo dentro de su horario (retardo, descansos largos, permiso o salida antes)${(d.horasExtrasReloj ?? 0) > 0 ? ': se resta de sus H.E. de ese día' : ''}</div>`;
       } else if (d.laboral && d.horasTrabajadas && d.horasTrabajadas > d.horasEsperadas + 0.08) {
         resumenDia = `<span class="texto-chico">+${horasYMin(+(d.horasTrabajadas - d.horasEsperadas).toFixed(2))} sobre jornada</span>`;
       } else if (d.laboral && d.horasTrabajadas) resumenDia = '<span class="etiqueta et-verde">Completa</span>';

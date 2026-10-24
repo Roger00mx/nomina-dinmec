@@ -383,7 +383,7 @@ async function formatosPago(fecha) {
         esRetardo: !!d.esRetardo, retardoMin: d.retardoMin || 0, excepcion: d.excepcion || '',
         horasTrabajadas: d.horasTrabajadas || 0, horasEsperadas: d.horasEsperadas || 0,
         horasExtrasReloj: +Number(reloj).toFixed(2), horasExtrasPagadas: d.horasExtras || 0, horasDebe: d.horasDebe || 0,
-        salDesayuno: d.salDesayuno, regDesayuno: d.regDesayuno, checadas: d.checadas || [], editadoManual: !!d.editadoManual,
+        salDesayuno: d.salDesayuno, regDesayuno: d.regDesayuno, minCastigo: d.minCastigo || 0, minDesayuno: d.minDesayuno || 0, minComida: d.minComida || 0, minPermisos: d.minPermisos || 0, checadas: d.checadas || [], editadoManual: !!d.editadoManual,
         horario: d.horario || '', horarioPersonal: !!d.horarioPersonal, horarioNota: d.horarioNota || '', horasExtras: d.horasExtras || 0,
         horasFormato, folios: [...new Set(tareas.map(t => t.folio).filter(Boolean))],
         formatosPendientes: tareas.filter(t => !t.firme).length,

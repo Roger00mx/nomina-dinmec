@@ -334,6 +334,9 @@ async function formatosDetalle(desde, hasta, empleados) {
       comidaMin: t.comida_aplica ? Number(t.comida_minutos) || 0 : 0, horas: horasTarea(t),
       descripcion: t.descripcion || '', concluido: t.concluido, avance: t.avance_pct,
       motivo: sol.he_motivo || '', tipoPago: sol.he_tipo_pago || '',
+      lugar: sol.he_lugar || '', lugarDetalle: sol.he_lugar_detalle || '', totalSolicitud: sol.he_total_horas,
+      fechaSolicitud: sol.fecha_solicitud || null, liderNombre: sol.lider_nombre || '', direccionNombre: sol.direccion_nombre || '',
+      comentarios: sol.comentarios_trabajador || '', orden: t.orden ?? null,
     });
   }
   const repPorSol = {};
@@ -346,6 +349,7 @@ async function formatosDetalle(desde, hasta, empleados) {
       horas: b.total_horas != null ? +Number(b.total_horas).toFixed(2) : null, pagaHoras: !!sol.ps_paga_horas,
       reposicion: (repPorSol[b.solicitud_id] || []).map(r => ({ del: r.fecha_del, al: r.fecha_al, entrada: hhmm(r.hora_entrada), salida: hhmm(r.hora_salida) })),
       motivo: sol.comentarios_trabajador || '',
+      fechaSolicitud: sol.fecha_solicitud || null, liderNombre: sol.lider_nombre || '', direccionNombre: sol.direccion_nombre || '',
     });
   }
   for (const v of vacs.filas) {

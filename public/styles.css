@@ -177,12 +177,20 @@ th.ordenable { cursor: pointer; }
 .tj-tabla td.tj-retardo { background: #e53935; color: #fff; font-weight: 700; }
 .tj-tabla td.tj-dif { color: var(--rojo); font-weight: 700; }
 .tj-tabla tr.tj-falta td { background: #5b8fd6; color: #fff; }
-.tj-tabla tr.tj-falta td.tj-fmt, .tj-tabla tr.tj-falta td.tj-horas { background: #5b8fd6; }
+.tj-tabla tr.tj-falta td.tj-fmt, .tj-tabla tr.tj-falta td.tj-horas, .tj-tabla tr.tj-falta td.tj-ver { background: #5b8fd6; }
 .tj-tabla tr.tj-nolab td { color: #889; }
 .tj-formato { white-space: nowrap; font-size: 12.5px; }
 .tj-formato a { color: var(--azul); font-weight: 600; text-decoration: none; margin-left: 4px; }
 .tj-formato a:hover, .tj-obs a:hover { text-decoration: underline; }
 .tj-pend { color: var(--ambar); font-size: 11px; }
+.tj-tabla th.tj-th-grupo { background: #c9d9f2; }
+.tj-tabla th.tj-th-accion { background: #d5dfe3; }
+.tj-tabla td.tj-ver { background: #dff7f9; text-align: left; white-space: nowrap; }
+.tj-tabla td.tj-accion { white-space: nowrap; text-align: left; }
+.tj-tabla td.tj-res-dif { box-shadow: inset 3px 0 0 var(--rojo); }
+.tj-link { color: var(--azul); font-weight: 600; text-decoration: none; font-size: 12.5px; }
+.tj-link:hover { text-decoration: underline; }
+.tj-ok { color: var(--verde); }
 .tj-chec { font-size: 10.5px; color: #778; white-space: normal; }
 .tj-rojo { color: var(--rojo); }
 .tj-pie { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 14px; margin-top: 12px; }
@@ -226,3 +234,9 @@ th.ordenable { cursor: pointer; }
   .pestanas { margin-left: 0; }
   main { padding: 10px; }
 }
+
+/* tarjeta: sin recorte de alto y columnas compactas */
+.tj .tabla-scroll { max-height: none; }
+.tj-tabla td.tj-obs { min-width: 150px; max-width: 190px; }
+.tj-tabla td.tj-accion .btn-mini { padding: 3px 7px; font-size: 11.5px; }
+.tj-tabla th, .tj-tabla td { padding-left: 4px; padding-right: 4px; }

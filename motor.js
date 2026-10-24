@@ -353,6 +353,29 @@ function calcularPeriodo(opciones) {
 
   // Índice de horarios capturados a mano (entrada/salida editadas, con responsable
   // y foto de justificación): "id_fecha" -> captura. Manda sobre checadas y viajes.
+  // Horarios personalizados (carga de trabajo, CNC): "id_fecha" -> turno armado al momento
+  // con la entrada y salida de su JORNADA. El tiempo extra empieza al terminar esa jornada.
+  // { idReloj, desde, hasta, entrada:'19:00', salida:'03:24', dias:[1..7], nota }
+  const horarioPorDia = {};
+  for (const h of (opciones.horarios || [])) {
+    if (!h.desde || !h.entrada || !h.salida) continue;
+    const dias = (h.dias && h.dias.length) ? h.dias : [1, 2, 3, 4, 5, 6, 7];
+    const ent = aMin(h.entrada), sal = aMin(h.salida);
+    const cruza = sal <= ent;
+    const span = (cruza ? sal + 1440 : sal) - ent;
+    const turno = {
+      codigo: 'PERSONAL', descripcion: 'Horario personalizado ' + h.entrada + '–' + h.salida,
+      horaEntrada: h.entrada, horaSalida: h.salida, cruzaMedianoche: cruza,
+      horasDia: +(span / 60).toFixed(2), dias: [1, 2, 3, 4, 5, 6, 7], descuentaDescansos: false,
+      personal: true, nota: h.nota || '',
+    };
+    let f = h.desde;
+    const hasta = h.hasta && h.hasta >= h.desde ? h.hasta : h.desde;
+    for (let i = 0; i < 120 && f <= hasta; i++, f = sumarDias(f, 1)) {
+      if (dias.includes(diaSemana(f))) horarioPorDia[h.idReloj + '_' + f] = turno;
+    }
+  }
+
   const capturaPorDia = {};
   for (const c of (opciones.capturas || [])) {
     if (c.fecha) capturaPorDia[c.idReloj + '_' + c.fecha] = c;
@@ -427,6 +450,8 @@ function calcularPeriodo(opciones) {
           turnoDia = turnosPorCodigo[exc.turnoAlternativo];
           turnoDetectado = false;
         }
+        const horarioPers = horarioPorDia[empleado.idReloj + '_' + fecha];
+        if (horarioPers) { turnoDia = horarioPers; turnoDetectado = false; }
         if (!turnoDia) continue;
 
         // Checadas del día (con ventana ampliada para turno nocturno)
@@ -463,6 +488,13 @@ function calcularPeriodo(opciones) {
 
         const dia = calcularDia(fecha, empleado, turnoDia, minutosDia, exc, parametros, feriados.has(fecha));
         dia.semana = s + 1;
+        dia.horario = turnoDia.horaEntrada + '–' + turnoDia.horaSalida;
+        if (horarioPers) {
+          dia.horarioPersonal = true;
+          dia.horarioNota = horarioPers.nota;
+          dia.turno = 'Horario ' + dia.horario;
+          dia.alertas.unshift('🕘 Horario personalizado ' + dia.horario + ' (jornada ' + minAHora(Math.round(horarioPers.horasDia * 60)) + ')' + (horarioPers.nota ? ' — ' + horarioPers.nota : ''));
+        }
         // Todas las checadas del día tal cual (⁺¹ = madrugada del día siguiente), para el detalle
         dia.checadas = minutosDia.map(m => minAHora(m % 1440) + (m >= 1440 ? '⁺¹' : ''));
         if (turnoDetectado && (minutosDia.length > 0 || dia.laboral)) {

@@ -260,14 +260,40 @@ function calcularDia(fecha, empleado, turno, minutos, excepcion, parametros, esF
   if (minTrabajados < 0) minTrabajados = 0;
   dia.horasTrabajadas = +(minTrabajados / 60).toFixed(2);
 
-  // Horas extras (redondeadas hacia abajo a múltiplos de 0.5 h)
+  // Horas extras
   if (!laboralTurno) {
     // Día no laboral trabajado (sábado extra, feriado): todo cuenta como extra.
     dia.horasExtras = redondearExtra(dia.horasTrabajadas, parametros);
+    dia.heBruta = dia.horasExtras;
+    dia.horasDebeDia = 0;
     if (dia.horasTrabajadas > 0) dia.alertas.push('Día no laboral trabajado: horas cuentan como extra');
   } else {
+    // Día laboral: el tiempo extra es lo trabajado FUERA del horario del turno
+    // (antes de la entrada o después de la salida). Unos minutos antes o después
+    // (menos del umbral, 30 min) no se pagan. Ej.: turno 7:00–17:00, checa 6:54 y
+    // sale 18:02 -> extra 1 h 02 min (de 17:00 a 18:02); los 6 min de antes no cuentan.
+    const umbral = parametros.umbralHorasExtra ?? 0.5;
+    const salidaTurno = aMin(turno.horaSalida) + (turno.cruzaMedianoche ? 1440 : 0);
+    const antesMin = c.entradaAsumida ? 0 : Math.max(0, entradaTurno - entrada);
+    const despuesMin = c.salidaAsumida ? 0 : Math.max(0, salida - salidaTurno);
+    const antes = antesMin / 60 >= umbral ? antesMin / 60 : 0;
+    const despues = despuesMin / 60 >= umbral ? despuesMin / 60 : 0;
+    const bruto = antes + despues;
+
+    // Lo que le faltó DENTRO de su horario (retardo, exceso de descansos, permisos,
+    // salida anticipada) se descuenta de esas horas extra del mismo día.
+    const dentro = minTrabajados / 60 - antesMin / 60 - despuesMin / 60;
+    let debe = diaLibre ? 0 : Math.max(0, dia.horasEsperadas - dentro);
+    if (debe < 5 / 60) debe = 0;
+    dia.heBruta = redondearExtra(bruto, parametros);
+    dia.horasDebeDia = +debe.toFixed(2);
+    const neto = bruto - debe;
+    dia.horasExtras = neto >= umbral ? redondearExtra(neto, parametros) : 0;
+    if (bruto > 0 && debe > 0) {
+      dia.alertas.push(`H.E. fuera de horario ${minAHora(Math.round(bruto * 60))} − faltante dentro del horario ${minAHora(Math.round(debe * 60))}`
+        + ` = ${dia.horasExtras ? minAHora(Math.round(dia.horasExtras * 60)) : '00:00'} a pagar`);
+    }
     const extra = dia.horasTrabajadas - dia.horasEsperadas;
-    dia.horasExtras = extra >= parametros.umbralHorasExtra ? redondearExtra(extra, parametros) : 0;
     if (extra < -0.5 && !c.salidaAsumida && !diaLibre) {
       dia.alertas.push(`Salió ${Math.abs(extra).toFixed(1)} h antes de completar su turno`);
     }
@@ -453,6 +479,8 @@ function calcularPeriodo(opciones) {
           dia.esRetardo = false;
           dia.retardoMin = 0;
           dia.horasExtras = extraDia;
+          dia.heBruta = extraDia;
+          dia.horasDebeDia = 0;
           dia.horasTrabajadas = +((dia.laboral ? dia.horasEsperadas : 0) + extraDia).toFixed(2);
           dia.entrada = null; dia.salida = null;
           dia.salDesayuno = null; dia.regDesayuno = null; dia.salComida = null; dia.regComida = null;
@@ -476,6 +504,9 @@ function calcularPeriodo(opciones) {
           let extra = dia.laboral ? Math.max(0, hrs - dia.horasEsperadas) : hrs;
           if (dia.laboral && extra < parametros.umbralHorasExtra) extra = 0;
           dia.horasExtras = redondearExtra(extra, parametros);
+          dia.heBruta = dia.horasExtras;
+          dia.horasDebeDia = dia.laboral ? +Math.max(0, dia.horasEsperadas - hrs).toFixed(2) : 0;
+          if (dia.horasDebeDia < 5 / 60) dia.horasDebeDia = 0;
           dia.alertas = ['✏️ Horario capturado por ' + (captura.capturadoPor || '(sin nombre)')
             + (captura.foto ? ' · 📷 con foto' : '')
             + (captura.nota ? ' — ' + captura.nota : '')];
@@ -486,12 +517,13 @@ function calcularPeriodo(opciones) {
         // Horas que le faltaron para completar su jornada (día laboral trabajado, sin falta ni día libre).
         // Informativo: se pueden compensar con sus horas extra o con su banco de horas.
         dia.horasDebe = 0;
-        if (dia.laboral && !dia.falta && dia.numChecadas > 0 && dia.horasEsperadas > 0
+        if (dia.laboral && !dia.falta && (dia.numChecadas > 0 || dia.editadoManual) && dia.horasEsperadas > 0
             && !['Permiso', 'Incapacidad', 'Vacaciones'].includes(dia.excepcion)) {
-          const faltan = dia.horasEsperadas - dia.horasTrabajadas;
-          if (faltan >= 5 / 60) dia.horasDebe = +faltan.toFixed(2);
+          dia.horasDebe = dia.horasDebeDia || 0;
         }
-        dia.horasExtrasReloj = dia.horasExtras;
+        // H.E. del reloj = tiempo fuera de horario (bruto), para compararlo con el formato.
+        // dia.horasExtras = lo que se paga (bruto menos lo que debe ese día).
+        dia.horasExtrasReloj = dia.heBruta ?? dia.horasExtras;
         const conc = conciliacion[empleado.idReloj + '_' + fecha];
         if (conc && conc.usar === 'formato' && conc.horas != null && !isNaN(Number(conc.horas))) {
           const h = +Number(conc.horas).toFixed(2);

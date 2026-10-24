@@ -381,7 +381,7 @@ async function formatosPago(fecha) {
         salComida: d.salComida, regComida: d.regComida, numChecadas: d.numChecadas || 0, falta: !!d.falta,
         esRetardo: !!d.esRetardo, retardoMin: d.retardoMin || 0, excepcion: d.excepcion || '',
         horasTrabajadas: d.horasTrabajadas || 0, horasEsperadas: d.horasEsperadas || 0,
-        horasExtrasReloj: +Number(reloj).toFixed(2), horasExtrasPagadas: d.horasExtras || 0,
+        horasExtrasReloj: +Number(reloj).toFixed(2), horasExtrasPagadas: d.horasExtras || 0, horasDebe: d.horasDebe || 0,
         horasFormato, folios: [...new Set(tareas.map(t => t.folio).filter(Boolean))],
         formatosPendientes: tareas.filter(t => !t.firme).length,
         estado, decision: dec, alertas: d.alertas || [],

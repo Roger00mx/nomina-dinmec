@@ -247,3 +247,18 @@ th.ordenable { cursor: pointer; }
 .tj-tabla td.tj-hor-pers { background: #fff3cd; font-weight: 700; }
 .tj-hor-link { color: var(--azul); text-decoration: none; }
 .tj-hor-link:hover { text-decoration: underline; }
+
+/* columnas nuevas de la tarjeta */
+.tj-tabla th.tj-th-am { background: #fff200; color: #333; }
+.tj-tabla th.tj-th-permiso { background: #00f0f0; color: #123; }
+.tj-tabla th.tj-th-lila { background: #d9d2e9; color: #333; }
+.tj-tabla th.tj-th-ajuste { min-width: 150px; font-size: 10.5px; }
+.tj-tabla td.tj-perm { background: #f3f0fa; }
+.tj-tabla td.tj-ajuste { text-align: left; white-space: normal; min-width: 140px; max-width: 200px; font-size: 12px; }
+.tj-tabla td.tj-paga { background: #e9f6ec; }
+.tj-tabla td.tj-ed { cursor: pointer; }
+.tj-tabla td.tj-ed:hover { outline: 2px solid var(--naranja); outline-offset: -2px; }
+/* ventana aparte: solo la tarjeta, a todo lo ancho */
+body.modo-ventana header, body.modo-ventana #pestanas, body.modo-ventana nav { display: none !important; }
+body.modo-ventana #contenido { max-width: none; padding: 10px; }
+body.modo-ventana .tj .tabla-scroll { max-height: none; }

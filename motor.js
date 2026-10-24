@@ -137,7 +137,9 @@ function clasificarDia(minutos, turno, empleado, parametros, laboral) {
   descansos.sort((a, b) => a.sal - b.sal);
   if (descansos.length === 1) {
     const mitadTurno = (entradaTurno + salidaTurno) / 2;
-    if (turno.cruzaMedianoche || descansos[0].sal >= mitadTurno) r.comida = descansos[0];
+    if (parametros._descansoUnico === 'comida') r.comida = descansos[0];
+    else if (parametros._descansoUnico === 'desayuno') r.desayuno = descansos[0];
+    else if (turno.cruzaMedianoche || descansos[0].sal >= mitadTurno) r.comida = descansos[0];
     else r.desayuno = descansos[0];
   } else {
     if (descansos.length > 0) r.desayuno = descansos[0];
@@ -581,7 +583,29 @@ function calcularPeriodo(opciones) {
         // Horario editado a mano (entrada y salida exactas, con responsable y foto):
         // tiene la última palabra sobre checadas y sobre el registro de viaje.
         const captura = capturaPorDia[empleado.idReloj + '_' + fecha];
-        if (captura && captura.entrada && captura.salida) {
+        const conDescansos = captura && captura.entrada && captura.salida
+          && (captura.salDesayuno || captura.regDesayuno || captura.salComida || captura.regComida || captura.justificado === false);
+        if (conDescansos) {
+          // Captura completa (entrada, desayuno, comida, salida): se calcula el día con las
+          // MISMAS reglas que unas checadas reales (descansos, retardo, extra fuera de horario).
+          // Sirve cuando no checan desayuno/comida (sobre todo en días de tiempo extra).
+          const ent = aMin(captura.entrada);
+          const aM = h => { if (!h) return null; let m = aMin(h); if (m < ent) m += 1440; return m; };
+          const ms = [ent, aM(captura.salDesayuno), aM(captura.regDesayuno), aM(captura.salComida), aM(captura.regComida), aM(captura.salida)]
+            .filter(m => m != null).sort((a, b) => a - b);
+          const conDes = !!(captura.salDesayuno && captura.regDesayuno), conCom = !!(captura.salComida && captura.regComida);
+          const paramCap = conDes !== conCom ? { ...parametros, _descansoUnico: conCom ? 'comida' : 'desayuno' } : parametros;
+          const nuevo = calcularDia(fecha, empleado, turnoDia, ms, exc, paramCap, feriados.has(fecha));
+          const conservar = { semana: dia.semana, horario: dia.horario, horarioPersonal: dia.horarioPersonal, horarioNota: dia.horarioNota, turno: dia.turno };
+          Object.assign(dia, nuevo, conservar);
+          dia.checadas = ms.map(m => minAHora(m % 1440) + (m >= 1440 ? '⁺¹' : ''));
+          if (captura.justificado) { dia.falta = false; dia.esRetardo = false; dia.retardoMin = 0; }
+          if (dia.entrada) dia.entrada = dia.entrada.replace('*', '') + '✏';
+          if (dia.salida) dia.salida = dia.salida.replace('*', '') + '✏';
+          dia.alertas.unshift('✏️ Horario y descansos capturados por ' + (captura.capturadoPor || '(sin nombre)')
+            + (captura.foto ? ' · 📷 con foto' : '') + (captura.nota ? ' — ' + captura.nota : ''));
+          dia.editadoManual = true;
+        } else if (captura && captura.entrada && captura.salida) {
           let ent = aMin(captura.entrada), sal = aMin(captura.salida);
           if (sal <= ent) sal += 1440; // salida al día siguiente (viaje nocturno)
           const hrs = +((sal - ent) / 60).toFixed(2);

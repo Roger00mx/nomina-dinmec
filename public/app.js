@@ -799,6 +799,160 @@ function pintarDashboard(rango) {
   });
 }
 
+
+// ============================================================
+// TARJETA DEL TRABAJADOR (detalle diario de una persona, estilo hoja de Excel)
+// Checadas por columna, horario del formato de H.E. (inicio–fin) junto al reloj
+// y enlace para ver el formato completo que capturó el trabajador.
+// ============================================================
+function hhmmDeHoras(h) {
+  if (!h) return '';
+  const t = Math.round(h * 60);
+  return String(Math.floor(t / 60)).padStart(2, '0') + ':' + String(t % 60).padStart(2, '0');
+}
+
+function tarjetaEmpleadoHTML(idReloj, dias, FDIA, FALL, FERR) {
+  const emp = EMPLEADOS.find(e => String(e.idReloj) === String(idReloj)) || {};
+  const res = (NOMINA.resumen || []).find(r => String(r.idReloj) === String(idReloj)) || {};
+  const fEmp = FALL?.empleados?.find(e => String(e.idReloj) === String(idReloj)) || null;
+  const nombre = emp.nombre || res.nombre || dias[0]?.nombre || '';
+  const limpio = t => (t && t !== '—') ? esc(t) : '';
+  const dinero2 = n => n != null && !isNaN(n) ? '$ ' + Number(n).toLocaleString('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—';
+
+  let tot = { trab: 0, esp: 0, heReloj: 0, heForm: 0, hePag: 0, debe: 0, ret: 0, faltas: 0 };
+  const filas = dias.map((d, i) => {
+    const f = FDIA[d.idReloj + '_' + d.fecha] || {};
+    const heReloj = d.horasExtrasReloj ?? d.horasExtras;
+    tot.trab += d.horasTrabajadas || 0; tot.esp += d.horasEsperadas || 0; tot.heReloj += heReloj || 0;
+    tot.heForm += f.horasFormato || 0; tot.hePag += d.horasExtras || 0; tot.debe += d.horasDebe || 0;
+    tot.ret += d.esRetardo ? 1 : 0; tot.faltas += d.falta ? 1 : 0;
+
+    const tareas = (f.tareas || []);
+    const formato = tareas.length ? tareas.map(t => `<div class="tj-formato">
+        <b>${esc(t.horaInicio || '?')} – ${esc(t.horaFin || 'pend.')}</b> <span>${t.horas != null ? hhmmDeHoras(t.horas) : ''}</span>
+        <a href="#" data-formato="${esc(t.solicitudId)}" data-tipo="he" title="Ver el formato que capturó">${esc(t.folio)} 🔎</a>${t.firme ? '' : ' <span class="tj-pend">sin autorizar</span>'}</div>`).join('') : '';
+    const obs = [];
+    if (d.falta) obs.push('<b class="tj-rojo">FALTA</b>');
+    if (d.esRetardo) obs.push(`<span class="tj-rojo">Retardo +${d.retardoMin} min</span>`);
+    if (f.vacaciones || d.excepcion === 'Vacaciones') obs.push('🏖 Vacaciones');
+    for (const b of (f.permisos || [])) obs.push(`🚪 Permiso ${esc(b.horaSalida || '')}–${esc(b.horaRegreso || '')} <a href="#" data-formato="${esc(b.solicitudId)}" data-tipo="ps">${esc(b.folio)} 🔎</a> (${b.pagaHoras ? 'se pagan' : 'las repone'})`);
+    if (d.excepcion && d.excepcion !== 'Vacaciones') obs.push(esc(d.excepcion));
+    if (d.horasDebe) obs.push(`<span class="tj-rojo">Debe ${horasYMin(d.horasDebe)}</span>`);
+    if (f.estado && f.estado !== 'sin_extra' && f.estado !== 'coincide' && ESTADO_CONC[f.estado]) obs.push(`<span class="etiqueta ${ESTADO_CONC[f.estado].c}">${ESTADO_CONC[f.estado].t}</span>`);
+    if (f.decision) obs.push(f.decision.usar === 'formato' ? '✔ Autorizado por formato' : '🔗 Emparejado con reloj');
+    const otras = (d.checadas || []).length > 6 ? `<div class="tj-chec">Todas: ${(d.checadas || []).map(esc).join(' · ')}</div>` : '';
+
+    const cls = d.falta ? 'tj-falta' : (!d.laboral ? 'tj-nolab' : '');
+    const dif = tareas.length ? Math.abs((f.horasFormato || 0) - (heReloj || 0)) : 0;
+    return `<tr class="${cls}">
+      <td class="tj-n">${i + 1}</td>
+      <td class="tj-fecha">${d.dia} ${fechaBonita(d.fecha)}${d.laboral ? '' : '<div class="tj-chec">no laboral</div>'}</td>
+      <td class="${d.esRetardo ? 'tj-retardo' : ''}">${limpio(d.entrada)}</td>
+      <td>${limpio(d.salDesayuno)}</td><td>${limpio(d.regDesayuno)}</td>
+      <td>${limpio(d.salComida)}</td><td>${limpio(d.regComida)}</td>
+      <td><b>${limpio(d.salida)}</b>${otras}</td>
+      <td class="tj-horas">${hhmmDeHoras(d.horasTrabajadas) || (d.laboral ? '00:00' : '')}</td>
+      <td class="tj-fmt">${formato}</td>
+      <td class="tj-num">${hhmmDeHoras(heReloj)}</td>
+      <td class="tj-num ${tareas.length && dif > 0.25 ? 'tj-dif' : ''}">${tareas.length ? hhmmDeHoras(f.horasFormato) : ''}</td>
+      <td class="tj-num"><b>${hhmmDeHoras(d.horasExtras)}</b></td>
+      <td class="tj-obs">${obs.join('<br>')}</td>
+      <td class="no-imprimir"><button class="btn btn-mini btn-editar-dia" data-fecha="${d.fecha}" title="Editar entrada/salida a mano">${d.editadoManual ? '✏️✔' : '✏️'}</button></td>
+    </tr>`;
+  }).join('');
+  const dif = +(tot.esp - tot.trab).toFixed(2);
+
+  return `
+    <div class="fila-controles no-imprimir" style="justify-content:space-between">
+      <button class="btn btn-mini" id="tj-tabla">📋 Ver como tabla</button>
+      <button class="btn btn-azul" id="tj-imprimir">🖨️ Imprimir tarjeta</button>
+    </div>
+    ${FERR ? `<div class="aviso aviso-ambar no-imprimir">No se pudieron traer los formatos de dinmec-app (${esc(FERR)}): se muestra solo lo del reloj.</div>` : ''}
+    <div class="tj">
+      <div class="tj-cab">
+        <table class="tj-datos"><tr><th>NÚMERO DE EMPLEADO:</th><td>${esc(idReloj)}</td></tr>
+          <tr><th>NOMBRE:</th><td>${esc(nombre)}</td></tr>
+          <tr><th>PUESTO / TURNO:</th><td>${esc(emp.puesto || res.puesto || '')} · ${esc(dias[0]?.turno || emp.turnoS1 || '')}</td></tr>
+          <tr><th>PERIODO:</th><td>${dias.length ? fechaBonita(dias[0].fecha) + ' al ' + fechaBonita(dias[dias.length - 1].fecha) : ''} · pago del ${fechaBonita(NOMINA.fechaPago)}</td></tr></table>
+        <table class="tj-sueldo"><tr><th>SUELDO SEMANAL:</th><td>${dinero2(res.sueldoSemanal ?? emp.sueldoSemanal)}</td></tr>
+          <tr><th>COSTO H. NORMAL:</th><td>${dinero2(emp.costoHoraNormal)}</td></tr>
+          <tr><th>COSTO H. EXTRA:</th><td>${dinero2(res.costoHoraExtra ?? emp.costoHoraExtra)}</td></tr></table>
+      </div>
+      <div class="tabla-scroll"><table class="tj-tabla">
+        <thead><tr><th></th><th>FECHA</th><th>HORA DE ENTRADA</th><th>SALIDA DESAYUNO</th><th>REGRESO DESAYUNO</th>
+          <th>SALIDA A COMER</th><th>REGRESO DE COMER</th><th>SALIDA</th><th>HORAS TRABAJADAS</th>
+          <th class="tj-th-fmt">FORMATO H.E.<br>INICIO – FIN</th><th>H.E. RELOJ</th><th>H.E. FORMATO</th><th>H.E. A PAGAR</th><th>OBSERVACIONES</th><th class="no-imprimir"></th></tr></thead>
+        <tbody>${filas || `<tr><td colspan="15" style="padding:14px">${esc(nombre)} no cobra en el pago del ${fechaBonita(NOMINA.fechaPago)}${(NOMINA.noCobranHoy || []).some(x => String(x.idReloj) === String(idReloj)) ? ' (su grupo quincenal cobra la siguiente semana): cambia la fecha de pago para ver su quincena' : ''}.</td></tr>`}</tbody>
+      </table></div>
+      <div class="tj-pie">
+        <table class="tj-tot">
+          <tr><th>HORAS LABORADAS</th><td>${hhmmDeHoras(tot.trab) || '00:00'}</td></tr>
+          <tr><th>HORAS A LABORAR</th><td>${hhmmDeHoras(tot.esp) || '00:00'}</td></tr>
+          <tr><th class="tj-rojo">DIF.</th><td class="tj-rojo">${dif > 0 ? '-' + hhmmDeHoras(dif) : '+' + (hhmmDeHoras(-dif) || '00:00')}</td></tr>
+        </table>
+        <table class="tj-tot">
+          <tr><th>H.E. SEGÚN RELOJ</th><td>${hhmmDeHoras(tot.heReloj) || '00:00'}</td></tr>
+          <tr><th>H.E. SEGÚN FORMATOS</th><td>${hhmmDeHoras(tot.heForm) || '00:00'}</td></tr>
+          <tr><th>HORAS QUE DEBE</th><td class="${tot.debe ? 'tj-rojo' : ''}">${hhmmDeHoras(tot.debe) || '00:00'}</td></tr>
+          <tr class="tj-azul"><th>HORAS EXTRAS A PAGAR</th><td>${hhmmDeHoras(tot.hePag) || '00:00'}</td></tr>
+        </table>
+        <table class="tj-tot">
+          <tr><th>RETARDOS</th><td>${tot.ret}</td></tr>
+          <tr><th>FALTAS</th><td>${tot.faltas}</td></tr>
+          <tr><th>FORMATOS DE H.E.</th><td>${new Set((fEmp?.he || []).map(t => t.folio)).size}</td></tr>
+          <tr><th>PERMISOS</th><td>${(fEmp?.permisos || []).length}</td></tr>
+        </table>
+      </div>
+      <p class="tj-nota">Horas en formato hh:mm. <b>Formato H.E. inicio – fin</b> = horario que el trabajador capturó en dinmec-app (🔎 abre el formato completo); debe cuadrar con la hora de salida del reloj.
+        <b>H.E. formato</b> en rojo = difiere más de 15 min de lo que marca el reloj. Lo autorizado en «Formatos vs reloj» se refleja en <b>H.E. a pagar</b>.</p>
+      <div class="firmas tj-firmas"><div>Trabajador</div><div>Recursos Humanos</div></div>
+    </div>`;
+}
+
+// Ventana con el formato completo (FO-RHS-07 horas extra / FO-RHS-08 permiso) tal como lo capturó el trabajador
+function verFormato(solicitudId, tipo, idReloj, FALL) {
+  const fEmp = FALL?.empleados?.find(e => String(e.idReloj) === String(idReloj));
+  if (!fEmp) return alert('No se encontró el formato.');
+  const items = (tipo === 'ps' ? fEmp.permisos : fEmp.he).filter(x => String(x.solicitudId) === String(solicitudId))
+    .sort((a, b) => (a.fecha + (a.horaInicio || a.horaSalida || '')).localeCompare(b.fecha + (b.horaInicio || b.horaSalida || '')));
+  if (!items.length) return alert('No se encontró el formato.');
+  const h = items[0];
+  const fondo = document.createElement('div');
+  fondo.style.cssText = 'position:fixed;inset:0;background:rgba(20,41,63,.6);z-index:160;display:flex;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto';
+  const LUGAR = { dinmec: 'Planta Dinmec', cliente: 'Planta del cliente', otro: 'Otro' };
+  const cuerpo = tipo === 'ps' ? `
+      <table class="tj-tabla"><thead><tr><th>Fecha</th><th>Salida</th><th>Regreso</th><th>Horas</th></tr></thead><tbody>
+        ${items.map(b => `<tr><td>${fechaBonita(b.fecha)}</td><td>${esc(b.horaSalida || '')}</td><td>${b.fechaRegreso && b.fechaRegreso !== b.fecha ? fechaBonita(b.fechaRegreso) + ' ' : ''}${esc(b.horaRegreso || '')}</td><td>${b.horas != null ? horasYMin(b.horas) : ''}</td></tr>`).join('')}
+      </tbody></table>
+      <p style="margin-top:8px"><b>Pago:</b> ${h.pagaHoras ? 'Las horas se pagan' : 'Las horas se reponen'}${h.reposicion?.length ? ' — reposición: ' + h.reposicion.map(r => `${fechaBonita(r.del)}${r.al && r.al !== r.del ? ' al ' + fechaBonita(r.al) : ''} ${r.entrada || ''}–${r.salida || ''}`).join(', ') : ''}</p>
+      ${h.motivo ? `<p><b>Motivo / comentarios:</b> ${esc(h.motivo)}</p>` : ''}` : `
+      <p><b>Motivo:</b> ${esc(h.motivo || '—')} · <b>Lugar:</b> ${esc(LUGAR[h.lugar] || h.lugar || '—')}${h.lugarDetalle ? ' (' + esc(h.lugarDetalle) + ')' : ''} · <b>Pago:</b> ${esc(h.tipoPago || '—')}${h.asignada ? ' · <b>Asignada por el líder</b>' : ''}</p>
+      <table class="tj-tabla" style="margin-top:8px"><thead><tr><th>Fecha</th><th>Inicio</th><th>Fin</th><th>Comida</th><th>Horas</th><th>Actividad realizada</th><th>Avance</th></tr></thead><tbody>
+        ${items.map(t => `<tr><td style="white-space:nowrap">${t.fecha === h.fecha && items.length > 1 ? '' : ''}${fechaBonita(t.fecha)}</td><td><b>${esc(t.horaInicio || '')}</b></td><td><b>${esc(t.horaFin || 'pendiente')}</b></td>
+          <td>${t.comidaMin ? t.comidaMin + ' min' : '—'}</td><td><b>${t.horas != null ? horasYMin(t.horas) : ''}</b></td>
+          <td style="white-space:normal;min-width:220px">${esc(t.descripcion || '')}</td><td>${t.concluido ? 'Concluida' : (t.avance != null ? t.avance + '%' : '')}</td></tr>`).join('')}
+        <tr><td colspan="4" style="text-align:right"><b>Total</b></td><td><b>${horasYMin(items.reduce((a, t) => a + (t.horas || 0), 0))}</b></td><td colspan="2"></td></tr>
+      </tbody></table>
+      ${h.comentarios ? `<p style="margin-top:8px"><b>Comentarios del trabajador:</b> ${esc(h.comentarios)}</p>` : ''}`;
+  fondo.innerHTML = `
+    <div class="tarjeta" style="max-width:860px;width:100%;margin:0">
+      <div style="display:flex;align-items:center;gap:12px;border-bottom:3px solid var(--naranja);padding-bottom:8px;margin-bottom:10px">
+        <img src="logo.png" alt="" style="height:42px">
+        <div style="flex:1"><h2 style="margin:0">${tipo === 'ps' ? 'FO-RHS-08 · Permiso de salida' : 'FO-RHS-07 · Solicitud de tiempo extra'}</h2>
+          <div class="texto-chico">Folio <b>${esc(h.folio)}</b>${h.fechaSolicitud ? ' · solicitado el ' + fechaBonita(String(h.fechaSolicitud).slice(0, 10)) : ''}</div></div>
+        <span class="etiqueta ${h.firme ? 'et-verde' : 'et-ambar'}">${esc(h.estatusTxt)}</span>
+      </div>
+      <p><b>Trabajador:</b> ${esc(fEmp.nombre)} · N° ${esc(fEmp.idReloj)}</p>
+      ${cuerpo}
+      <p class="texto-chico" style="margin-top:8px">VoBo líder: <b>${esc(h.liderNombre || '—')}</b> · Autorizó Dirección: <b>${esc(h.direccionNombre || '—')}</b></p>
+      <div class="fila-controles" style="margin-top:12px"><button class="btn" id="vf-cerrar">Cerrar</button></div>
+    </div>`;
+  document.body.appendChild(fondo);
+  const cerrar = () => fondo.remove();
+  fondo.addEventListener('click', e => { if (e.target === fondo) cerrar(); });
+  fondo.querySelector('#vf-cerrar').addEventListener('click', cerrar);
+}
+
 // ============================================================
 // VISTA: DETALLE DIARIO
 // ============================================================
@@ -836,9 +990,10 @@ VISTAS.detalle = async function () {
   filtro.querySelector('#det-emp').value = empGuardado;
 
   // Formatos de dinmec-app (H.E., permisos, vacaciones) por "id_fecha"; si no responde, el detalle sigue sin ellos.
-  let FDIA = {}, FERR = '';
+  let FDIA = {}, FERR = '', FALL = null;
   try {
     const F = await api(`/api/formatos?fecha=${NOMINA.fechaPago}`);
+    FALL = F;
     if (!F.dinmecOk) FERR = F.dinmecError || 'sin conexión';
     for (const e of F.empleados) for (const x of e.filas) {
       FDIA[e.idReloj + '_' + x.fecha] = { ...x, tareas: e.he.filter(t => t.fecha === x.fecha) };
@@ -856,6 +1011,22 @@ VISTAS.detalle = async function () {
     if (emp) dias = dias.filter(d => d.idReloj == emp);
     else dias = dias.filter(d => d.numChecadas > 0 || d.falta || d.alertas.length || FDIA[d.idReloj + '_' + d.fecha]?.folios?.length);
     if (soloAlertas) dias = dias.filter(d => d.alertas.length || d.falta || d.horasDebe);
+
+    if (emp && sessionStorage.getItem('det-vista') !== 'tabla') {
+      tarjetaTabla.innerHTML = tarjetaEmpleadoHTML(emp, NOMINA.dias.filter(d => d.idReloj == emp), FDIA, FALL, FERR);
+      tarjetaTabla.querySelector('#tj-tabla').addEventListener('click', () => { sessionStorage.setItem('det-vista', 'tabla'); pintar(); });
+      tarjetaTabla.querySelector('#tj-imprimir').addEventListener('click', () => {
+        $('#zona-impresion').innerHTML = `<div class="tj-print"><div class="recibo-cab"><img src="logo.png" alt="">
+          <div><h2>${esc(PARAMETROS.empresa || 'DINMEC')} — Tarjeta de asistencia y horas extra</h2></div></div>${tarjetaTabla.querySelector('.tj').outerHTML}</div>`;
+        window.print();
+      });
+      tarjetaTabla.querySelectorAll('[data-formato]').forEach(a => a.addEventListener('click', ev => {
+        ev.preventDefault(); verFormato(a.dataset.formato, a.dataset.tipo, emp, FALL);
+      }));
+      tarjetaTabla.querySelectorAll('.btn-editar-dia').forEach(btn =>
+        btn.addEventListener('click', () => editarDia(NOMINA.dias.find(d => d.idReloj == emp && d.fecha === btn.dataset.fecha))));
+      return;
+    }
 
     const COLS = 12;
     let filas = '';
@@ -933,6 +1104,7 @@ VISTAS.detalle = async function () {
       <h2>Detalle diario — pago del ${fechaBonita(NOMINA.fechaPago)}
         <span class="texto-chico">(quincenal: ${fechaBonita(NOMINA.quincenal.inicio)} al ${fechaBonita(NOMINA.quincenal.fin)} ·
         semanal: ${fechaBonita(NOMINA.semanal.inicio)} al ${fechaBonita(NOMINA.semanal.fin)})</span></h2>
+      ${emp ? '<p><button class="btn btn-mini" id="tj-volver">🪪 Ver como tarjeta del trabajador</button></p>' : ''}
       ${FERR ? `<div class="aviso aviso-ambar">No se pudieron traer los formatos de dinmec-app (${esc(FERR)}): se muestra solo lo del reloj.</div>` : ''}
       <div class="tabla-scroll"><table>
         <thead><tr>
@@ -947,6 +1119,8 @@ VISTAS.detalle = async function () {
 
     tarjetaTabla.querySelectorAll('.btn-editar-dia').forEach(btn =>
       btn.addEventListener('click', () => editarDia(dias[+btn.dataset.i])));
+    const volver = tarjetaTabla.querySelector('#tj-volver');
+    if (volver) volver.addEventListener('click', () => { sessionStorage.setItem('det-vista', 'tarjeta'); pintar(); });
   }
 
   // Editor manual de un día: corrige entrada/salida con responsable y nota.

@@ -157,7 +157,47 @@ td input, td select { padding: 4px 6px; border: 1px solid var(--borde); border-r
 .chips .etiqueta { font-size: 12px; }
 th.ordenable { cursor: pointer; }
 
+/* ---------- tarjeta del trabajador (detalle diario de una persona) ---------- */
+.tj-cab { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.tj-datos, .tj-sueldo, .tj-tot { border-collapse: collapse; font-size: 13px; width: auto; }
+.tj-datos th { background: #e3e6ea; text-align: right; padding: 4px 8px; font-weight: 700; color: #3a4656; white-space: nowrap; }
+.tj-datos td { background: #e3e6ea; padding: 4px 10px; font-weight: 700; }
+.tj-sueldo th, .tj-tot th { border: 1px solid #333; padding: 4px 8px; text-align: right; font-weight: 700; white-space: nowrap; background: #fff; color: var(--texto); }
+.tj-sueldo td, .tj-tot td { border: 1px solid #333; padding: 4px 10px; text-align: right; min-width: 90px; white-space: nowrap; }
+.tj-tabla { border-collapse: collapse; width: 100%; font-size: 13px; }
+.tj-tabla th { background: #e3e6ea; color: #3a4656; border: 1px solid #555; padding: 5px 6px; font-size: 11.5px; text-align: center; white-space: normal; position: static; }
+.tj-tabla td { border: 1px dotted #777; padding: 4px 6px; text-align: center; white-space: nowrap; }
+.tj-tabla td.tj-fecha { text-align: left; }
+.tj-tabla td.tj-n { color: #556; font-size: 12px; }
+.tj-tabla td.tj-horas { background: #dff3f7; font-weight: 600; }
+.tj-tabla th.tj-th-fmt, .tj-tabla td.tj-fmt { background: #fdf0e2; }
+.tj-tabla td.tj-fmt { text-align: left; }
+.tj-tabla td.tj-num { text-align: right; }
+.tj-tabla td.tj-obs { text-align: left; white-space: normal; min-width: 170px; font-size: 12px; }
+.tj-tabla td.tj-retardo { background: #e53935; color: #fff; font-weight: 700; }
+.tj-tabla td.tj-dif { color: var(--rojo); font-weight: 700; }
+.tj-tabla tr.tj-falta td { background: #5b8fd6; color: #fff; }
+.tj-tabla tr.tj-falta td.tj-fmt, .tj-tabla tr.tj-falta td.tj-horas { background: #5b8fd6; }
+.tj-tabla tr.tj-nolab td { color: #889; }
+.tj-formato { white-space: nowrap; font-size: 12.5px; }
+.tj-formato a { color: var(--azul); font-weight: 600; text-decoration: none; margin-left: 4px; }
+.tj-formato a:hover, .tj-obs a:hover { text-decoration: underline; }
+.tj-pend { color: var(--ambar); font-size: 11px; }
+.tj-chec { font-size: 10.5px; color: #778; white-space: normal; }
+.tj-rojo { color: var(--rojo); }
+.tj-pie { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 14px; margin-top: 12px; }
+.tj-tot tr.tj-azul th, .tj-tot tr.tj-azul td { background: #3f6fbf; color: #fff; }
+.tj-nota { font-size: 11.5px; color: #667; margin-top: 10px; }
+.tj-firmas { display: none; }
+
 @media print {
+  .tj-print .no-imprimir { display: none !important; }
+  .tj-print .tj-firmas { display: flex; justify-content: space-around; margin-top: 40px; }
+  .tj-print .tj-firmas div { border-top: 1px solid #333; padding: 4px 40px 0; text-align: center; }
+  .tj-print { font-size: 11px; }
+  .tj-print .tj-tabla { font-size: 10.5px; }
+  .tj-print .tabla-scroll { overflow: visible; max-height: none; }
+  .tj-print a { color: inherit; text-decoration: none; }
   .dash-print .fila-controles, .dash-print .btn { display: none !important; }
   .dash-print .tarjeta, .dash-print .kpi { box-shadow: none; border: 1px solid #ccc; break-inside: avoid; }
   .dash-print .tabla-scroll { overflow: visible; max-height: none; }

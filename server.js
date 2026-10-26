@@ -522,6 +522,87 @@ const servidor = http.createServer(async (req, res) => {
       return json(res, 200, { conectado: tieneAcceso(req), empresa: store.leer('parametros', {}).empresa || '' });
     }
     
+    // ---- revisión de horas extra desde dinmec-app (menú Recursos Humanos) ----
+    // Mismo resguardo que /api/asistencia: token TOKEN_ASISTENCIA + orígenes ORIGENES_ASISTENCIA.
+    // Devuelve la comparación formatos contra reloj (sin dinero) y permite conciliar,
+    // capturar descansos y horarios personalizados, igual que en la pestaña de nómina.
+    if (ruta.startsWith('/api/app/')) {
+      const origen = req.headers.origin || '';
+      const permitidos = (process.env.ORIGENES_ASISTENCIA || '').split(',').map(x => x.trim()).filter(Boolean);
+      const okOrigen = permitidos.length === 0 || (origen && permitidos.includes(origen));
+      res.setHeader('Access-Control-Allow-Origin', permitidos.length ? (okOrigen ? origen : 'null') : '*');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-token-asistencia');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, OPTIONS');
+      res.setHeader('Access-Control-Max-Age', '86400');
+      res.setHeader('Vary', 'Origin');
+      if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+      const esperado = process.env.TOKEN_ASISTENCIA || '';
+      if (!esperado) return json(res, 503, { error: 'Falta la variable TOKEN_ASISTENCIA en Render.' });
+      if ((req.headers['x-token-asistencia'] || '') !== esperado) return json(res, 401, { error: 'Token invalido' });
+      if (!okOrigen) return json(res, 403, { error: 'Origen no permitido' });
+
+      try {
+        if (ruta === '/api/app/formatos' && req.method === 'GET') {
+          const r = await formatosPago(url.searchParams.get('fecha') || new Date().toISOString().slice(0, 10));
+          const par = store.leer('parametros', {});
+          return json(res, 200, { ...r, diaInicioSemana: par.diaInicioSemana || 5, umbralHorasExtra: par.umbralHorasExtra ?? 0.5 });
+        }
+        if (ruta === '/api/app/conciliacion' && req.method === 'PUT') {
+          const { idReloj, fecha, usar, horas, folios, nota, usuario } = await leerCuerpo(req);
+          if (idReloj == null || !fecha) return json(res, 400, { error: 'Faltan trabajador y fecha' });
+          const conc = store.leer('conciliacion', {});
+          const clave = idReloj + '_' + fecha;
+          if (!usar) delete conc[clave];
+          else {
+            if (!['formato', 'reloj'].includes(usar)) return json(res, 400, { error: 'Decisión inválida' });
+            if (usar === 'formato' && (horas == null || isNaN(Number(horas)) || Number(horas) < 0 || Number(horas) > 24))
+              return json(res, 400, { error: 'Horas inválidas' });
+            conc[clave] = { usar, horas: usar === 'formato' ? +Number(horas).toFixed(2) : null, folios: folios || '', nota: nota || '',
+              por: usuario || '', desde: 'dinmec-app', el: new Date().toISOString() };
+          }
+          store.guardar('conciliacion', conc);
+          return json(res, 200, { ok: true });
+        }
+        if (ruta === '/api/app/captura' && req.method === 'GET') {
+          const id = url.searchParams.get('idReloj'), f = url.searchParams.get('fecha');
+          return json(res, 200, store.leer('capturas', []).find(c => String(c.idReloj) === String(id) && c.fecha === f) || null);
+        }
+        if (ruta === '/api/app/captura' && req.method === 'PUT') {
+          const c = await leerCuerpo(req);
+          if (c.idReloj == null || !c.fecha) return json(res, 400, { error: 'Faltan trabajador y fecha' });
+          const lista = store.leer('capturas', []).filter(x => !(String(x.idReloj) === String(c.idReloj) && x.fecha === c.fecha));
+          if (!c.borrar) {
+            if (!c.entrada || !c.salida) return json(res, 400, { error: 'Faltan entrada y salida' });
+            const prev = store.leer('capturas', []).find(x => String(x.idReloj) === String(c.idReloj) && x.fecha === c.fecha);
+            lista.push({ idReloj: Number(c.idReloj), fecha: c.fecha, entrada: c.entrada, salida: c.salida,
+              salDesayuno: c.salDesayuno || '', regDesayuno: c.regDesayuno || '', salComida: c.salComida || '', regComida: c.regComida || '',
+              justificado: !!c.justificado, capturadoPor: c.capturadoPor || c.usuario || '', nota: c.nota || '', foto: prev?.foto || '' });
+          }
+          store.guardar('capturas', lista);
+          return json(res, 200, { ok: true });
+        }
+        if (ruta === '/api/app/horarios' && req.method === 'GET') {
+          const id = url.searchParams.get('idReloj');
+          return json(res, 200, store.leer('horarios', []).filter(h => String(h.idReloj) === String(id)));
+        }
+        if (ruta === '/api/app/horarios' && req.method === 'PUT') {
+          // Reemplaza la lista de horarios personalizados de UN trabajador
+          const { idReloj, lista } = await leerCuerpo(req);
+          if (idReloj == null || !Array.isArray(lista)) return json(res, 400, { error: 'Se esperaba { idReloj, lista }' });
+          const otros = store.leer('horarios', []).filter(h => String(h.idReloj) !== String(idReloj));
+          const limpios = lista.filter(h => h.desde && h.entrada && h.salida).map(h => ({
+            idReloj: Number(idReloj), desde: h.desde, hasta: h.hasta || h.desde, entrada: h.entrada, salida: h.salida,
+            dias: Array.isArray(h.dias) && h.dias.length ? h.dias.map(Number) : [1, 2, 3, 4, 5, 6, 7], nota: h.nota || '', el: h.el || new Date().toISOString() }));
+          store.guardar('horarios', [...otros, ...limpios]);
+          return json(res, 200, { ok: true });
+        }
+        return json(res, 404, { error: 'No existe' });
+      } catch (e) {
+        console.error('API app:', e);
+        return json(res, 500, { error: e.message });
+      }
+    }
+
     // ---- asistencia de UN trabajador, para que la vea el en dinmec-app ----
     // No usa la sesion de nomina (viene de otro dominio): se protege con el
     // token TOKEN_ASISTENCIA y con la lista de origenes ORIGENES_ASISTENCIA.

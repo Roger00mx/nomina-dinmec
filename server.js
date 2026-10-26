@@ -632,6 +632,8 @@ const servidor = http.createServer(async (req, res) => {
           horasTrabajadas: d.horasTrabajadas,
           horasEsperadas: d.horasEsperadas,
           horasExtras: d.horasExtras,
+          horasExtrasReloj: d.horasExtrasReloj ?? d.horasExtras,
+          horasDebe: d.horasDebe || 0,
           alertas: d.alertas || [],
         })),
       });

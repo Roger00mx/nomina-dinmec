@@ -301,7 +301,8 @@ function calcularDia(fecha, empleado, turno, minutos, excepcion, parametros, esF
     dia.heBruta = redondearExtra(bruto, parametros);
     dia.horasDebeDia = +debe.toFixed(2);
     const neto = bruto - debe;
-    dia.horasExtras = neto >= umbral ? redondearExtra(neto, parametros) : 0;
+    // El umbral ya se aplicó al tiempo fuera de horario; lo que queda después de cubrir la jornada se paga completo
+    dia.horasExtras = neto > 0 ? redondearExtra(neto, parametros) : 0;
     if (bruto > 0 && debe > 0) {
       dia.alertas.push(`H.E. fuera de horario ${minAHora(Math.round(bruto * 60))} − faltante dentro del horario ${minAHora(Math.round(debe * 60))}`
         + ` = ${dia.horasExtras ? minAHora(Math.round(dia.horasExtras * 60)) : '00:00'} a pagar`);

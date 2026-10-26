@@ -119,6 +119,7 @@ function datosBase() {
     banco: store.leer('banco', {}),
     decisiones: store.leer('decisiones', {}),
     conciliacion: store.leer('conciliacion', {}),
+    descansos: store.leer('descansos', {}),
     parametros: store.leer('parametros', {}),
   };
 }
@@ -383,7 +384,7 @@ async function formatosPago(fecha) {
         esRetardo: !!d.esRetardo, retardoMin: d.retardoMin || 0, excepcion: d.excepcion || '',
         horasTrabajadas: d.horasTrabajadas || 0, horasEsperadas: d.horasEsperadas || 0,
         horasExtrasReloj: +Number(reloj).toFixed(2), horasExtrasPagadas: d.horasExtras || 0, horasDebe: d.horasDebe || 0,
-        salDesayuno: d.salDesayuno, regDesayuno: d.regDesayuno, minCastigo: d.minCastigo || 0, minDesayuno: d.minDesayuno || 0, minComida: d.minComida || 0, minPermisos: d.minPermisos || 0, checadas: d.checadas || [], editadoManual: !!d.editadoManual,
+        salDesayuno: d.salDesayuno, regDesayuno: d.regDesayuno, minCastigo: d.minCastigo || 0, descansoNoChecadoMin: d.descansoNoChecadoMin || 0, minDesayuno: d.minDesayuno || 0, minComida: d.minComida || 0, minPermisos: d.minPermisos || 0, checadas: d.checadas || [], editadoManual: !!d.editadoManual,
         horario: d.horario || '', horarioPersonal: !!d.horarioPersonal, horarioNota: d.horarioNota || '', horasExtras: d.horasExtras || 0,
         horasFormato, folios: [...new Set(tareas.map(t => t.folio).filter(Boolean))],
         formatosPendientes: tareas.filter(t => !t.firme).length,
@@ -561,6 +562,17 @@ const servidor = http.createServer(async (req, res) => {
               por: usuario || '', desde: 'dinmec-app', el: new Date().toISOString() };
           }
           store.guardar('conciliacion', conc);
+          return json(res, 200, { ok: true });
+        }
+        if (ruta === '/api/app/descanso' && req.method === 'PUT') {
+          const { idReloj, fecha, min, usuario } = await leerCuerpo(req);
+          if (idReloj == null || !fecha) return json(res, 400, { error: 'Faltan trabajador y fecha' });
+          const m = Number(min) || 0;
+          if (m < 0 || m > 240) return json(res, 400, { error: 'Minutos inválidos' });
+          const des = store.leer('descansos', {});
+          if (!m) delete des[idReloj + '_' + fecha];
+          else des[idReloj + '_' + fecha] = { min: m, por: usuario || '', el: new Date().toISOString() };
+          store.guardar('descansos', des);
           return json(res, 200, { ok: true });
         }
         if (ruta === '/api/app/captura' && req.method === 'GET') {
@@ -888,12 +900,12 @@ const servidor = http.createServer(async (req, res) => {
 
       // Respaldo completo de todos los datos (para migrar a la nube o guardar copia)
       const COLECCIONES_RESPALDO = ['parametros', 'empleados', 'turnos', 'checadas', 'excepciones',
-        'asignaciones', 'viajes', 'capturas', 'horarios', 'prestamos', 'banco', 'decisiones', 'conciliacion', 'periodos'];
+        'asignaciones', 'viajes', 'capturas', 'horarios', 'prestamos', 'banco', 'decisiones', 'conciliacion', 'descansos', 'periodos'];
 
       if (ruta === '/api/respaldo' && req.method === 'GET') {
         const datos = { app: 'nomina-dinmec', creado: new Date().toISOString() };
         for (const c of COLECCIONES_RESPALDO) {
-          const porDefecto = ['parametros', 'banco', 'decisiones', 'conciliacion'].includes(c) ? {} : [];
+          const porDefecto = ['parametros', 'banco', 'decisiones', 'conciliacion', 'descansos'].includes(c) ? {} : [];
           datos[c] = store.leer(c, porDefecto);
         }
         return json(res, 200, datos);

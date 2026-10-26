@@ -399,6 +399,7 @@ function calcularPeriodo(opciones) {
   // usar 'formato' = se pagan las horas extra del formato FO-RHS-07 aunque el reloj
   // no las muestre; usar 'reloj' = revisado / emparejado, se paga lo que marca el reloj.
   const conciliacion = opciones.conciliacion || {};
+  const descansosNoChecados = opciones.descansos || {};
 
   // Agrupar checadas por empleado y fecha (en minutos desde medianoche).
   // Para turnos nocturnos, las checadas de madrugada pertenecen al día anterior.
@@ -625,6 +626,26 @@ function calcularPeriodo(opciones) {
             + (captura.foto ? ' · 📷 con foto' : '')
             + (captura.nota ? ' — ' + captura.nota : '')];
           dia.editadoManual = true;
+        }
+
+        // Descanso no checado (comida 30 min / desayuno + comida 50 min, capturado por RH):
+        // se descuenta de lo trabajado. En día de descanso baja el extra; en día laboral
+        // cuenta como tiempo que debe de su jornada (se resta del extra de ese día).
+        const ajD = descansosNoChecados[empleado.idReloj + '_' + fecha];
+        if (ajD && ajD.min > 0 && !dia.falta && (dia.numChecadas > 0 || dia.editadoManual)) {
+          const h = ajD.min / 60;
+          dia.minCastigo = (dia.minCastigo || 0) + ajD.min;
+          dia.horasTrabajadas = +Math.max(0, dia.horasTrabajadas - h).toFixed(2);
+          if (!dia.laboral) {
+            dia.horasExtras = redondearExtra(Math.max(0, dia.horasExtras - h), parametros);
+            dia.heBruta = dia.horasExtras;
+          } else {
+            dia.horasDebeDia = +((dia.horasDebeDia || 0) + h).toFixed(2);
+            const bruto = dia.heBruta ?? dia.horasExtras;
+            dia.horasExtras = redondearExtra(Math.max(0, bruto - dia.horasDebeDia), parametros);
+          }
+          dia.descansoNoChecadoMin = ajD.min;
+          dia.alertas.push(`🍽 Descanso no checado: se descontaron ${ajD.min} min${ajD.por ? ' (' + ajD.por + ')' : ''}`);
         }
 
         // Conciliación con los formatos de horas extra (última palabra sobre las horas extra del día)

@@ -273,7 +273,7 @@ function horasTarea(t) {
 
 const ESTATUS_TXT = {
   pendiente_trabajador: 'Espera acuse del trabajador', pendiente_lider: 'Espera VoBo líder',
-  pendiente_direccion: 'Espera Dirección', autorizada: 'Autorizada', enviada_finanzas: 'Enviada a Finanzas',
+  pendiente_direccion: 'Espera autorización RH', autorizada: 'Autorizada', enviada_finanzas: 'Enviada a Finanzas',
 };
 
 // Devuelve { ok, error, porId: { idReloj: { he:[], permisos:[], vacaciones:[] } }, sinEnlazar: [] }

@@ -1237,7 +1237,7 @@ function verFormato(solicitudId, tipo, idReloj, FALL) {
       </div>
       <p><b>Trabajador:</b> ${esc(fEmp.nombre)} · N° ${esc(fEmp.idReloj)}</p>
       ${cuerpo}
-      <p class="texto-chico" style="margin-top:8px">VoBo líder: <b>${esc(h.liderNombre || '—')}</b> · Autorizó Dirección: <b>${esc(h.direccionNombre || '—')}</b></p>
+      <p class="texto-chico" style="margin-top:8px">VoBo líder: <b>${esc(h.liderNombre || '—')}</b> · Autorizó (RH): <b>${esc(h.direccionNombre || '—')}</b></p>
       <div class="fila-controles" style="margin-top:12px"><button class="btn" id="vf-cerrar">Cerrar</button></div>
     </div>`;
   document.body.appendChild(fondo);
